@@ -1,8 +1,8 @@
 
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { SettingsProvider } from './contexts/SettingsContext';
 
 // In a real build, environment variables would be set by a build tool (e.g., Vite, Webpack).
 // For this environment, ensure the following process.env variables are set:
@@ -23,6 +23,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <SettingsProvider>
+      <App />
+    </SettingsProvider>
   </React.StrictMode>
 );

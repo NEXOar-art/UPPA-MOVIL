@@ -1,10 +1,11 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Coordinates, RouteResult, PlaceAutocompleteSuggestion, TravelMode } from '../types';
 import { fetchAutocompleteSuggestions, fetchPlaceDetails } from '../services/geolocationService';
 import LoadingSpinner from './LoadingSpinner';
+import { useSettings } from '../contexts/SettingsContext';
 
 interface TripPlannerProps {
-  isGoogleMapsApiLoaded: boolean;
   onSetRoute: (origin: Coordinates, destination: Coordinates, travelMode: TravelMode) => void;
   onClearRoute: () => void;
   onShowRecentReports: () => void;
@@ -15,7 +16,6 @@ interface TripPlannerProps {
 }
 
 const TripPlanner: React.FC<TripPlannerProps> = ({ 
-    isGoogleMapsApiLoaded, 
     onSetRoute, 
     onClearRoute,
     onShowRecentReports,
@@ -24,6 +24,7 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
     aiRouteSummary,
     isAiSummaryLoading,
 }) => {
+  const { t } = useSettings();
   const [originQuery, setOriginQuery] = useState('');
   const [destinationQuery, setDestinationQuery] = useState('');
   const [originSuggestions, setOriginSuggestions] = useState<PlaceAutocompleteSuggestion[]>([]);
@@ -82,18 +83,19 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
     suggestion: PlaceAutocompleteSuggestion,
     type: 'origin' | 'destination'
   ) => {
-    const { placeId, text } = suggestion.placePrediction;
+    const { text } = suggestion.placePrediction;
+    const placeName = text.text;
     
     if (type === 'origin') {
-      setOriginQuery(text.text);
+      setOriginQuery(placeName);
       setOriginSuggestions([]);
     } else {
-      setDestinationQuery(text.text);
+      setDestinationQuery(placeName);
       setDestinationSuggestions([]);
     }
     setActiveInput(null);
 
-    const details = await fetchPlaceDetails(placeId);
+    const details = await fetchPlaceDetails(placeName);
     if (details) {
       if (type === 'origin') {
         setOriginCoords(details.location);
@@ -113,7 +115,7 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
   
   // Recalculate route when travel mode changes and a route is already set
   useEffect(() => {
-    if (originCoords && destinationCoords) {
+    if (originCoords && destinationCoords && routeResult) {
       handleFindRoute();
     }
   }, [travelMode]);
@@ -150,22 +152,21 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
   );
   
   const travelModeButtons = [
-      { mode: 'DRIVE' as TravelMode, icon: 'fas fa-car', label: 'Auto' },
-      { mode: 'BICYCLE' as TravelMode, icon: 'fas fa-bicycle', label: 'Bicicleta' },
-      { mode: 'WALK' as TravelMode, icon: 'fas fa-walking', label: 'Caminando' },
+      { mode: 'DRIVE' as TravelMode, icon: 'fas fa-car', label: t('travelModeDrive') },
+      { mode: 'WALK' as TravelMode, icon: 'fas fa-walking', label: t('travelModeWalk') },
   ]
 
   return (
     <div className="space-y-4" ref={plannerRef}>
-      <h2 className="text-2xl font-bold text-blue-300 font-orbitron border-b border-blue-500/20 pb-2">Planificador de Misión</h2>
+      <h2 className="text-2xl font-bold text-blue-300 font-orbitron border-b border-blue-500/20 pb-2">{t('tripPlannerTitle')}</h2>
       <div className="space-y-3">
         <div className="relative">
-          <label htmlFor="origin" className="block text-sm font-medium text-blue-300 mb-1">Origen</label>
+          <label htmlFor="origin" className="block text-sm font-medium text-blue-300 mb-1">{t('originLabel')}</label>
           <input
             id="origin"
             type="text"
             className="w-full ps-input"
-            placeholder="Ej: Obelisco, Buenos Aires"
+            placeholder={t('originPlaceholder')}
             value={originQuery}
             onChange={(e) => handleQueryChange(e.target.value, 'origin')}
             onFocus={() => setActiveInput('origin')}
@@ -181,12 +182,12 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
           )}
         </div>
         <div className="relative">
-          <label htmlFor="destination" className="block text-sm font-medium text-blue-300 mb-1">Destino</label>
+          <label htmlFor="destination" className="block text-sm font-medium text-blue-300 mb-1">{t('destinationLabel')}</label>
           <input
             id="destination"
             type="text"
             className="w-full ps-input"
-            placeholder="Ej: Estación de tren de Tigre"
+            placeholder={t('destinationPlaceholder')}
             value={destinationQuery}
             onChange={(e) => handleQueryChange(e.target.value, 'destination')}
             onFocus={() => setActiveInput('destination')}
@@ -223,29 +224,29 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
           disabled={!originCoords || !destinationCoords || isRouteLoading}
           className="flex-1 ps-button active flex items-center justify-center"
         >
-          {isRouteLoading ? <LoadingSpinner size="w-5 h-5"/> : <><i className="fas fa-route mr-2"></i>Buscar Ruta</>}
+          {isRouteLoading ? <LoadingSpinner size="w-5 h-5"/> : <><i className="fas fa-route mr-2"></i>{t('findRouteButton')}</>}
         </button>
         <button
           onClick={handleClear}
           className="ps-button"
         >
-          <i className="fas fa-times"></i> Limpiar
+          <i className="fas fa-times"></i> {t('clearButton')}
         </button>
       </div>
       
       {(routeResult || isRouteLoading) && (
         <div className="pt-4 border-t border-blue-500/20 space-y-3">
-          <h3 className="text-lg font-semibold text-blue-300">Detalles del Viaje</h3>
+          <h3 className="text-lg font-semibold text-blue-300">{t('tripDetailsTitle')}</h3>
           {isRouteLoading && !routeResult && <div className="flex justify-center"><LoadingSpinner/></div>}
           {routeResult?.error && <p className="text-red-400 bg-red-900/50 p-2 rounded-md">{routeResult.error}</p>}
           {routeResult?.duration && routeResult?.distance && (
             <div className="flex justify-around text-center bg-slate-900/50 p-2 rounded-md">
                 <div>
-                    <p className="text-xs text-gray-400">Duración</p>
+                    <p className="text-xs text-gray-400">{t('durationLabel')}</p>
                     <p className="font-bold text-white"><i className="fas fa-clock mr-1 text-blue-400"></i>{routeResult.duration}</p>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-400">Distancia</p>
+                    <p className="text-xs text-gray-400">{t('distanceLabel')}</p>
                     <p className="font-bold text-white"><i className="fas fa-road mr-1 text-blue-400"></i>{routeResult.distance}</p>
                 </div>
             </div>
@@ -253,13 +254,13 @@ const TripPlanner: React.FC<TripPlannerProps> = ({
 
           <div className="space-y-2">
              <div className="flex justify-between items-center">
-                <h4 className="text-md font-semibold text-blue-300">Resumen IA</h4>
+                <h4 className="text-md font-semibold text-blue-300">{t('aiSummaryTitle')}</h4>
                 <button
                     onClick={onShowRecentReports}
                     className="text-xs ps-button"
                     title="Ver los últimos reportes de la comunidad"
                 >
-                    <i className="fas fa-list-alt mr-2"></i> Reportes
+                    <i className="fas fa-list-alt mr-2"></i> {t('reportsButton')}
                 </button>
             </div>
              {isAiSummaryLoading && (

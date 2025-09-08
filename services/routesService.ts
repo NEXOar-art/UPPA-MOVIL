@@ -1,84 +1,81 @@
-import { GOOGLE_MAPS_API_KEY } from '../constants';
-import { Coordinates, TravelMode } from '../types';
 
-interface RoutesApiResponse {
-  routes?: {
-    distanceMeters: number;
-    duration: string;
-    polyline: {
-      encodedPolyline: string;
-    };
-  }[];
-  error?: {
-    code: number;
-    message: string;
-    status: string;
-  };
+
+import { LOCATIONIQ_API_KEY } from '../constants';
+import { Coordinates, TravelMode, RouteResult } from '../types';
+import { fetchWithRetry } from './geolocationService';
+
+interface LocationIQRoute {
+  distance: number;
+  duration: number;
+  geometry: any; // GeoJSON object
 }
 
-export interface RouteResultWithPolyline {
-  duration?: string;
-  distance?: string;
-  error?: string;
-  polyline?: string;
+interface LocationIQDirectionsResponse {
+  code: string;
+  routes?: LocationIQRoute[];
+  message?: string;
+  error?: string; // LocationIQ sometimes returns error in this field
 }
 
-export const fetchRoute = async (origin: Coordinates, destination: Coordinates, travelMode: TravelMode): Promise<RouteResultWithPolyline> => {
-  if (!GOOGLE_MAPS_API_KEY) {
-    return { error: 'Google Maps API Key no configurada.' };
+// Mapping our TravelMode to LocationIQ's profile strings
+const travelModeMap: Record<TravelMode, 'driving' | 'cycling' | 'walking'> = {
+    DRIVE: 'driving',
+    BICYCLE: 'cycling',
+    WALK: 'walking',
+};
+
+export const fetchRoute = async (origin: Coordinates, destination: Coordinates, travelMode: TravelMode): Promise<RouteResult> => {
+  if (!LOCATIONIQ_API_KEY) {
+    return { error: 'La clave API de LocationIQ no está configurada.' };
   }
-  const url = 'https://routes.googleapis.com/directions/v2:computeRoutes';
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-    'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
-  };
-  const body = {
-    origin: { location: { latLng: origin } },
-    destination: { location: { latLng: destination } },
-    travelMode: travelMode,
-    routingPreference: 'TRAFFIC_AWARE',
-  };
+  const profile = travelModeMap[travelMode];
+  const coordinates = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+  // FIX: Corrected the hostname. The Directions API lives on the `us1` subdomain, not `api`.
+  const url = `https://us1.locationiq.com/v1/directions/${profile}/${coordinates}?key=${LOCATIONIQ_API_KEY}&geometries=geojson&overview=full`;
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify(body),
-    });
+    const response = await fetchWithRetry(url);
 
-    const data: RoutesApiResponse = await response.json();
+    // FIX: Added robust error handling for non-JSON responses, which was causing a crash.
+    // The response body is now read as text first if the status code is not OK.
+    if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = errorText;
+        try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error || errorJson.message || errorText;
+        } catch (e) {
+            // Not JSON, use raw text.
+        }
+        console.error(`Error de la API de rutas (${response.status}):`, errorMessage);
+        return { error: `No se pudo calcular la ruta: ${errorMessage}` };
+    }
+      
+    const data: LocationIQDirectionsResponse = await response.json();
 
-    if (!response.ok || data.error) {
-      console.error("Routes API error:", data.error);
-      const errorMessage = data.error?.message || 'Error desconocido al calcular la ruta.';
-      if (errorMessage.includes("API key not valid")) {
-        return { error: 'La clave de API de Google Maps no es válida o está restringida.' };
-      }
-      if (errorMessage.includes("Routes API has not been used")) {
-        return { error: 'El servicio de Rutas (Routes API) no está activado para este proyecto. Por favor, actívalo en la consola de Google Cloud.' };
-      }
-      return { error: errorMessage };
+    if (data.code !== 'Ok') {
+      console.error("LocationIQ Directions API error:", data.message);
+      return { error: data.message || 'Error desconocido al calcular la ruta.' };
     }
     
     if (data.routes && data.routes.length > 0) {
         const route = data.routes[0];
-        const durationInSeconds = parseInt(route.duration.slice(0, -1), 10);
-        const minutes = Math.floor(durationInSeconds / 60);
+        const minutes = Math.floor(route.duration / 60);
         const durationText = `${minutes} min`;
-        const distanceText = `${(route.distanceMeters / 1000).toFixed(1)} km`;
+        const distanceText = `${(route.distance / 1000).toFixed(1)} km`;
 
         return {
             duration: durationText,
             distance: distanceText,
-            polyline: route.polyline.encodedPolyline,
+            geometry: route.geometry,
         };
     } else {
         return { error: 'No se encontró una ruta entre los puntos seleccionados.' };
     }
 
-  } catch (error) {
-    console.error("Error fetching route from Routes API:", error);
-    return { error: 'Fallo la conexión con el servicio de rutas. Revisa la consola para más detalles.' };
+  } catch (error: any) {
+    console.error("Error al buscar la ruta:", error);
+    // The specific error message from fetchWithRetry will be passed here.
+    return { error: `Fallo la conexión con el servicio de rutas. ${error.message}` };
   }
 };

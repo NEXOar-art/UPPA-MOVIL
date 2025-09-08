@@ -1,9 +1,10 @@
 {
-  "name": "Copy of Copy of UppA: Community Transport AR",
+  "name": "UppA: Comunidad y Transporte",
   "description": "UppA is a community-driven platform to improve the public transport experience in Argentina by sharing real-time information about buses (colectivos), safety, and service quality.",
   "requestFramePermissions": [
     "camera",
-    "geolocation"
+    "geolocation",
+    "microphone"
   ],
   "prompt": ""
 }

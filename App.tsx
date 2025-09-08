@@ -1,1058 +1,839 @@
-import React, { useReducer, useEffect, useCallback, useState, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { 
+    Bus, Report, UserProfile, Coordinates, ChatMessage, BusStop, ReportType, 
+    MicromobilityService, MicromobilityServiceType, GlobalChatMessage, RouteResult, TravelMode, 
+    UppyChatMessage, BusLineDetails, BadgeId, RatingHistoryEntry, ScheduleDetail 
+} from './types';
+import { 
+    MOCK_BUS_LINES, MOCK_BUS_STOPS_DATA, DEFAULT_MAP_CENTER, DEFAULT_USER_ID, 
+    DEFAULT_USER_NAME, BUS_LINE_ADDITIONAL_INFO, GEMINI_TEXT_MODEL, 
+    MAX_MICROMOBILITY_SERVICES_PER_PROVIDER 
+} from './constants';
+
+import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import MapDisplay from './components/MapDisplay';
-import ChatWindow from './components/ChatWindow';
+import PostTripReviewModal, { BusCard } from './components/BusCard';
 import ReportForm from './components/ReportForm';
+import ChatWindow from './components/ChatWindow';
 import Modal from './components/Modal';
-import LoadingSpinner from './components/LoadingSpinner';
-import LoginPage from './components/LoginPage';
 import TripPlanner from './components/TripPlanner';
-import MicromobilityRegistrationModal from './components/MicromobilityRegistrationModal';
-import MicromobilityServiceCard from './components/MicromobilityServiceCard'; 
-import MicromobilityChatWindow from './components/MicromobilityChatWindow';
-import CalculatorModal from './components/CalculatorModal';
 import LocationDashboard from './components/LocationDashboard';
-import PostTripReviewModal from './components/BusCard'; // Repurposed for PostTripReviewModal
-import OperatorInsightsModal from './components/FloatingMapModal'; // Repurposed for OperatorInsightsModal
-import { AppState, AppAction, Report, ChatMessage, GlobalChatMessage, MapEvent, ReportType, UserProfile, Bus, Coordinates, MicromobilityService, MicromobilityServiceType, SentimentFilterType, BusStop, NearestBusStopInfo, RouteResult, VehicleFocus, RatingHistoryEntry, ScheduleDetail, TravelMode } from './types';
-import { MOCK_BUS_LINES, REPORT_TYPE_ICONS, DEFAULT_USER_ID, DEFAULT_USER_NAME, API_KEY_ERROR_MESSAGE, MICROMOBILITY_SERVICE_ICONS, MAX_MICROMOBILITY_SERVICES_PER_PROVIDER, MOCK_BUS_STOPS_DATA, BUS_LINE_ADDITIONAL_INFO, CONTACTS_INFO_CAMPANA_ZARATE, MICROMOBILITY_PRICING } from './constants';
-import { analyzeSentiment, getAIAssistantResponse, getAiRouteSummary } from './services/geminiService';
+import MicromobilityChat from './components/MicromobilityChat';
+import MicromobilityServiceCard from './components/MicromobilityServiceCard';
+import MicromobilityRegistrationModal from './components/MicromobilityRegistrationModal';
+import OperatorInsightsModal from './components/FloatingMapModal';
+import UppyAssistant from './components/UppyAssistant';
+import CalculatorModal from './components/CalculatorModal';
+import ErrorToast from './components/ErrorToast';
+import RankingTable from './components/RankingTable';
+import MapErrorDisplay from './components/MapErrorDisplay';
+import MicromobilityChatWindow from './components/MicromobilityChatWindow';
+import AccessibilityControls from './components/AccessibilityControls';
+import AvailableServices from './components/AvailableServices';
+import PointsOfInterest from './components/PointsOfInterest';
+import { useSettings } from './contexts/SettingsContext';
+
 import { getAddressFromCoordinates } from './services/geolocationService';
-import { getWeather } from './services/mockWeatherService';
-import { WireframeBusIcon, WireframeCarIcon, WireframeMotoIcon } from './components/icons';
+import { fetchRoute } from './services/routesService';
+import { getWeather, getWeatherByLocationName } from './services/mockWeatherService';
+import { getUppyResponse, getUppySystemInstruction, getAiRouteSummary, analyzeSentiment } from './services/geminiService';
+import { audioService } from './services/audioService';
 
-interface LocationDashboardData {
-  location: Coordinates;
-  address: string | null;
-  weather: { condition: string; temp: number; icon: string; };
-  reports: Report[];
-  schedule: ScheduleDetail | null;
-}
+const App: React.FC = () => {
+    // FIX: Destructure `language` from useSettings to correctly set the document's lang attribute.
+    const { theme, fontSize, language, t } = useSettings();
 
-const initialState: AppState = {
-  reports: [],
-  buses: MOCK_BUS_LINES,
-  chatMessages: {},
-  micromobilityChatMessages: [], 
-  currentUser: null, 
-  isAuthenticated: false, 
-  selectedBusLineId: null,
-  isLoading: true, 
-  error: null,
-  showReportModal: false,
-  isGoogleMapsApiLoaded: window.googleMapsApiLoaded || false,
-  aiAssistantQuestion: '',
-  aiAssistantResponse: null,
-  isAIAssistantLoading: false,
-  micromobilityServices: [],
-  showMicromobilityRegistrationModal: false,
-  showMicromobilityRankingModal: false,
-  reportSentimentFilter: 'all',
-  nearestBusStop: null,
-  showCalculatorModal: false,
-  connectedUsersCount: 1,
-  routeOrigin: null,
-  routeDestination: null,
-  routeResult: null,
-  isRouteLoading: false,
-  aiRouteSummary: null,
-  isAiSummaryLoading: false,
-  travelMode: 'DRIVE',
-  vehicleFocus: 'bus',
-  showRecentReportsModal: false,
-  showSentimentAnalysisModal: false,
-  showRankingModal: false,
-  showOperatorInsightsModal: false,
-  postTripReviewData: null,
-};
+    useEffect(() => {
+        document.body.className = '';
+        document.body.classList.add(`theme-${theme}`);
+        document.documentElement.style.fontSize = `${fontSize}px`;
+        // FIX: Use 'language' directly. `t` is a function and does not have a `language` property.
+        document.documentElement.lang = language;
+    // FIX: Update dependency array to use `language` instead of the incorrect `t.language`.
+    }, [theme, fontSize, language]);
 
-// Helper function to calculate distance between two coordinates (simple Euclidean)
-function calculateDistance(coord1: Coordinates, coord2: Coordinates): number {
-  const dx = coord1.lng - coord2.lng;
-  const dy = coord1.lat - coord2.lat;
-  return Math.sqrt(dx * dx * 111 * 111); // Rough approximation for km
-}
+    // STATE MANAGEMENT
+    const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
+    const [connectedUsersCount, setConnectedUsersCount] = useState(0);
 
-// Helper function to calculate user progress
-const calculateUserProgress = (currentUser: UserProfile, xpGained: number, tokensGained: number): UserProfile => {
-    let newXp = currentUser.xp + xpGained;
-    let newLevel = currentUser.level;
-    let newXpToNextLevel = currentUser.xpToNextLevel;
+    // Map State
+    const [isMapReady, setIsMapReady] = useState(false);
+    const [isMapError, setIsMapError] = useState<string | null>(null);
+    const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
+    const [mapCenter, setMapCenter] = useState<Coordinates>(DEFAULT_MAP_CENTER);
+    const [mapZoom, setMapZoom] = useState(13);
 
-    while (newXp >= newXpToNextLevel) {
-        newXp -= newXpToNextLevel;
-        newLevel++;
-        newXpToNextLevel = Math.floor(newXpToNextLevel * 1.5);
-    }
+    // Data State
+    const [busLines, setBusLines] = useState<Record<string, Bus>>(MOCK_BUS_LINES);
+    const [busStops, setBusStops] = useState<Record<string, BusStop[]>>(MOCK_BUS_STOPS_DATA);
+    const [selectedBusLineId, setSelectedBusLineId] = useState<string | null>("LINEA_228CB");
+    const [reports, setReports] = useState<Record<string, Report[]>>({});
+    const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
+    const [globalChatMessages, setGlobalChatMessages] = useState<GlobalChatMessage[]>([]);
+    const [micromobilityServices, setMicromobilityServices] = useState<MicromobilityService[]>([]);
+    const [uppyChatHistory, setUppyChatHistory] = useState<UppyChatMessage[]>([]);
+    const [userPreferences, setUserPreferences] = useState<string[]>([]);
+    const [isUppyLoading, setIsUppyLoading] = useState(false);
+    const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+    const [weatherData, setWeatherData] = useState({ condition: "Cargando...", temp: 0, icon: "fas fa-spinner fa-spin" });
+    const [busSchedule, setBusSchedule] = useState<ScheduleDetail | null>(null);
 
-    const updatedBadges = new Set(currentUser.badges);
-    if(xpGained > 20) updatedBadges.add("Piloto Activo");
-    if(tokensGained > 0) updatedBadges.add("Colaborador");
+    // UI State
+    const [activeTab, setActiveTab] = useState<'transport' | 'pilot'>('transport');
+    const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+    const [isUppyModalOpen, setIsUppyModalOpen] = useState(false);
+    const [isMicromobilityRegisterModalOpen, setIsMicromobilityRegisterModalOpen] = useState(false);
+    const [isOperatorInsightsModalOpen, setIsOperatorInsightsModalOpen] = useState(false);
+    const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
+    const [isMicromobilityPanelOpen, setIsMicromobilityPanelOpen] = useState(true);
+    const [isPostTripReviewModalOpen, setIsPostTripReviewModalOpen] = useState(false);
+    const [serviceToReview, setServiceToReview] = useState<MicromobilityService | null>(null);
+    const [isMicromobilityChatModalOpen, setIsMicromobilityChatModalOpen] = useState(false);
+
+    // Micromobility Request Confirmation State
+    const [serviceToConfirm, setServiceToConfirm] = useState<string | null>(null);
+    const [confirmationCountdown, setConfirmationCountdown] = useState(60);
+    // FIX: Changed NodeJS.Timeout to number, which is the return type of setInterval in browser environments.
+    const countdownIntervalRef = useRef<number | null>(null);
 
 
-    return {
-        ...currentUser,
-        xp: newXp,
-        level: newLevel,
-        xpToNextLevel: newXpToNextLevel,
-        tokens: currentUser.tokens + tokensGained,
-        badges: Array.from(updatedBadges),
-    };
-};
+    // Trip Planner State
+    const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+    const [isRouteLoading, setIsRouteLoading] = useState(false);
+    const [aiRouteSummary, setAiRouteSummary] = useState<string | null>(null);
+    const [isAiSummaryLoading, setIsAiSummaryLoading] = useState(false);
+    const tripOriginRef = useRef<Coordinates|null>(null);
+    const tripDestinationRef = useRef<Coordinates|null>(null);
 
+    // DERIVED STATE
+    const selectedBus = useMemo(() => selectedBusLineId ? busLines[selectedBusLineId] : null, [selectedBusLineId, busLines]);
+    const selectedBusDetails = useMemo(() => selectedBusLineId ? BUS_LINE_ADDITIONAL_INFO[selectedBusLineId] : null, [selectedBusLineId]);
+    const isTopRankedUser = useMemo(() => currentUser ? currentUser.rank <= 5 : false, [currentUser]);
+    const hasAvailableMicromobility = useMemo(() => micromobilityServices.some(s => s.isActive && s.isAvailable && !s.isOccupied), [micromobilityServices]);
+    
+    const favoriteBusIds = currentUser?.favoriteBusLineIds || [];
+    const favoriteBuses = useMemo(() => 
+        favoriteBusIds.map(id => busLines[id]).filter(Boolean), 
+    [favoriteBusIds, busLines]);
 
-function appReducer(state: AppState, action: AppAction): AppState {
-  switch (action.type) {
-    case 'LOGIN_SUCCESS':
-      return {
-        ...state,
-        isAuthenticated: true,
-        currentUser: { 
-            id: DEFAULT_USER_ID, 
-            name: action.payload.userName,
-            avatar: `https://api.dicebear.com/8.x/bottts-neutral/svg?seed=${encodeURIComponent(action.payload.userName)}&backgroundRotation=0,360&radius=50`,
+    const otherBuses = useMemo(() => 
+        Object.values(busLines).filter(bus => !favoriteBusIds.includes(bus.id)),
+    [favoriteBusIds, busLines]);
+    
+    const availableServices = useMemo(() => 
+        micromobilityServices.filter(s => s.isActive && s.isAvailable && !s.isOccupied),
+        [micromobilityServices]
+    );
+
+    // HANDLERS
+    const showNotification = useCallback((message: string, type: 'error' | 'success' | 'info' = 'info') => {
+        setNotification({ message, type });
+    }, []);
+
+    const handleLogin = (userName: string) => {
+        const profile: UserProfile = {
+            id: `user-${Date.now()}`,
+            name: userName,
+            avatar: `https://api.dicebear.com/8.x/bottts/svg?seed=${userName}`,
             level: 1,
             xp: 0,
             xpToNextLevel: 100,
-            tokens: 50000, // Start with more tokens to test micromobility
+            tokens: 50000,
             badges: [],
-        }, 
-        isLoading: false, 
-        error: null,
-      };
-    case 'LOGOUT':
-      return {
-        ...initialState, 
-        isGoogleMapsApiLoaded: state.isGoogleMapsApiLoaded, 
-        isLoading: false, 
-      };
-    case 'ADD_REPORT': {
-      if (!state.currentUser) return state; 
-      
-      const updatedUser = calculateUserProgress(state.currentUser, 25, 5);
-
-      const updatedReports = [action.payload, ...state.reports];
-      const busToUpdate = state.buses[action.payload.busLineId];
-      let updatedBuses = state.buses;
-      if (busToUpdate) {
-         updatedBuses = {
-          ...state.buses,
-          [action.payload.busLineId]: {
-            ...busToUpdate,
-            statusEvents: [action.payload.id, ...busToUpdate.statusEvents].slice(0,5),
-            ...((action.payload.type === ReportType.LocationUpdate && action.payload.location) ? { currentLocation: action.payload.location } : {})
-          }
+            rank: Math.floor(Math.random() * 100) + 6, // Mock rank outside top 5
+            favoriteBusLineIds: [],
         };
-      }
-      return { ...state, reports: updatedReports, buses: updatedBuses, currentUser: updatedUser, error: null };
-    }
-    case 'ADD_CHAT_MESSAGE':
-      if (!state.currentUser) return state; 
-      const lineMessages = state.chatMessages[action.payload.busLineId] || [];
-      return {
-        ...state,
-        chatMessages: {
-          ...state.chatMessages,
-          [action.payload.busLineId]: [...lineMessages, action.payload],
-        },
-        error: null,
-      };
-    case 'ADD_MICROMOBILITY_CHAT_MESSAGE':
-        if (!state.currentUser) return state;
-        return {
-            ...state,
-            micromobilityChatMessages: [...state.micromobilityChatMessages, action.payload],
-            error: null,
-        };
-    case 'UPVOTE_REPORT':
-      return {
-        ...state,
-        reports: state.reports.map(r => r.id === action.payload.reportId ? { ...r, upvotes: r.upvotes + 1 } : r),
-      };
-    case 'SET_BUS_LOCATION':
-        const targetBus = state.buses[action.payload.busLineId];
-        if (!targetBus) return state;
-        return {
-            ...state,
-            buses: {
-                ...state.buses,
-                [action.payload.busLineId]: {
-                    ...targetBus,
-                    currentLocation: action.payload.location,
-                }
-            }
-        };
-    case 'SET_SELECTED_BUS_LINE':
-      return { 
-        ...state, 
-        vehicleFocus: 'bus',
-        selectedBusLineId: action.payload, 
-        aiAssistantResponse: null, 
-        aiAssistantQuestion: '', 
-        reportSentimentFilter: 'all',
-        nearestBusStop: null,
-      };
-    case 'SET_LOADING':
-      return { ...state, isLoading: action.payload };
-    case 'SET_ERROR':
-      return { ...state, error: action.payload, isLoading: false };
-    case 'TOGGLE_REPORT_MODAL':
-      return { ...state, showReportModal: action.payload !== undefined ? action.payload : !state.showReportModal };
-    case 'TOGGLE_RECENT_REPORTS_MODAL':
-      return { ...state, showRecentReportsModal: action.payload };
-    case 'TOGGLE_SENTIMENT_ANALYSIS_MODAL':
-        return { ...state, showSentimentAnalysisModal: action.payload };
-    case 'TOGGLE_RANKING_MODAL':
-        return { ...state, showRankingModal: action.payload };
-    case 'SET_SENTIMENT':
-       if (action.payload.type === 'report') {
-            return {
-                ...state,
-                reports: state.reports.map(r => r.id === action.payload.id ? { ...r, sentiment: action.payload.sentiment } : r),
-            };
-        } else if (action.payload.type === 'chat') {
-            const busLineIdForChat = Object.keys(state.chatMessages).find(key => state.chatMessages[key].some(msg => msg.id === action.payload.id));
-            if (busLineIdForChat) {
-                return {
-                    ...state,
-                    chatMessages: {
-                        ...state.chatMessages,
-                        [busLineIdForChat]: state.chatMessages[busLineIdForChat].map(msg => msg.id === action.payload.id ? { ...msg, sentiment: action.payload.sentiment } : msg)
-                    }
-                }
-            }
-            return state;
-        } else if (action.payload.type === 'globalchat') {
-            return {
-                ...state,
-                micromobilityChatMessages: state.micromobilityChatMessages.map(msg => msg.id === action.payload.id ? { ...msg, sentiment: action.payload.sentiment } : msg)
-            }
-        }
-        return state;
-    case 'SET_REVIEW_SENTIMENT': {
-        const { serviceId, timestamp, sentiment } = action.payload;
-        return {
-            ...state,
-            micromobilityServices: state.micromobilityServices.map(s => {
-                if (s.id === serviceId) {
-                    const history = s.ratingHistory.map(r => r.timestamp === timestamp ? { ...r, sentiment } : r);
-                    return { ...s, ratingHistory: history };
-                }
-                return s;
-            })
-        };
-    }
-    case 'SET_MAPS_API_LOADED':
-        const stillLoading = state.isAuthenticated ? state.isLoading : !action.payload;
-        return { ...state, isGoogleMapsApiLoaded: action.payload, isLoading: stillLoading };
-    case 'SET_AI_ASSISTANT_QUESTION':
-        return { ...state, aiAssistantQuestion: action.payload };
-    case 'SET_AI_ASSISTANT_RESPONSE':
-        return { ...state, aiAssistantResponse: action.payload, isAIAssistantLoading: false };
-    case 'SET_AI_ASSISTANT_LOADING':
-        return { ...state, isAIAssistantLoading: action.payload, error: null };
-    case 'ADD_OR_UPDATE_MICROMOBILITY_SERVICE':
-        if (!state.currentUser) return state;
-        const providerServices = state.micromobilityServices.filter(s => s.providerUserId === state.currentUser!.id);
-        const existingServiceIndex = state.micromobilityServices.findIndex(s => s.id === action.payload.id);
-
-        if (existingServiceIndex > -1) { 
-            const updatedServices = [...state.micromobilityServices];
-            updatedServices[existingServiceIndex] = action.payload;
-            return { ...state, micromobilityServices: updatedServices };
-        } else { 
-            if (providerServices.length >= MAX_MICROMOBILITY_SERVICES_PER_PROVIDER) {
-                return { ...state, error: `No puedes registrar más de ${MAX_MICROMOBILITY_SERVICES_PER_PROVIDER} servicios.` };
-            }
-            return { ...state, micromobilityServices: [...state.micromobilityServices, action.payload] };
-        }
-    case 'CONFIRM_MICROMOBILITY_PAYMENT': {
-        const serviceToActivate = state.micromobilityServices.find(s => s.id === action.payload.serviceId);
-        const { currentUser } = state;
-        if (!serviceToActivate || !currentUser) return state;
-
-        const price = MICROMOBILITY_PRICING[serviceToActivate.type]?.[serviceToActivate.subscriptionDurationHours];
-        if (price === undefined) return { ...state, error: "Precio no definido para este abono." };
-
-        if (currentUser.tokens < price) {
-            return { ...state, error: `No tienes suficientes Fichas (${price}) para activar este servicio.` };
-        }
-        
-        const updatedUser = { ...currentUser, tokens: currentUser.tokens - price };
-        const updatedService: MicromobilityService = {
-            ...serviceToActivate,
-            isPendingPayment: false,
-            isActive: true,
-            isAvailable: true,
-            subscriptionExpiryTimestamp: Date.now() + serviceToActivate.subscriptionDurationHours * 60 * 60 * 1000,
-        };
-
-        return {
-            ...state,
-            currentUser: updatedUser,
-            micromobilityServices: state.micromobilityServices.map(s =>
-                s.id === action.payload.serviceId ? updatedService : s
-            ),
-        };
-    }
-    case 'DEACTIVATE_EXPIRED_SERVICES': {
-        const now = Date.now();
-        return {
-            ...state,
-            micromobilityServices: state.micromobilityServices.map(s => {
-                if (s.isActive && s.subscriptionExpiryTimestamp && s.subscriptionExpiryTimestamp < now) {
-                    return { ...s, isActive: false, isAvailable: false };
-                }
-                return s;
-            })
-        };
-    }
-    case 'TOGGLE_MICROMOBILITY_AVAILABILITY': {
-      return {
-        ...state,
-        micromobilityServices: state.micromobilityServices.map(s => 
-          s.id === action.payload.serviceId ? { ...s, isAvailable: !s.isAvailable, ...( !s.isAvailable ? {} : { isOccupied: false } ) } : s
-        )
-      };
-    }
-    case 'TOGGLE_MICROMOBILITY_OCCUPIED_STATUS': {
-      const service = state.micromobilityServices.find(s => s.id === action.payload.serviceId);
-      if (!service || !state.currentUser) return state;
-
-      const isFinishingTrip = service.isOccupied;
-      let updatedUser = state.currentUser;
-      if (isFinishingTrip) {
-          updatedUser = calculateUserProgress(state.currentUser, 15, 10);
-      }
-
-      return {
-        ...state,
-        currentUser: updatedUser,
-        micromobilityServices: state.micromobilityServices.map(s => 
-          s.id === action.payload.serviceId ? { ...s, isOccupied: !s.isOccupied, ...(isFinishingTrip ? { completedTrips: s.completedTrips + 1 } : {}) } : s
-        ),
-        postTripReviewData: isFinishingTrip ? { serviceId: action.payload.serviceId } : null
-      };
-    }
-    case 'TOGGLE_MICROMOBILITY_REGISTRATION_MODAL':
-      return { ...state, showMicromobilityRegistrationModal: action.payload };
-    case 'TOGGLE_MICROMOBILITY_RANKING_MODAL':
-      return { ...state, showMicromobilityRankingModal: action.payload };
-    case 'SET_REPORT_SENTIMENT_FILTER':
-      return { ...state, reportSentimentFilter: action.payload };
-    case 'SET_NEAREST_BUS_STOP':
-        return { ...state, nearestBusStop: action.payload };
-    case 'TOGGLE_CALCULATOR_MODAL':
-        return { ...state, showCalculatorModal: action.payload };
-    case 'UPDATE_CONNECTED_USERS':
-        return { ...state, connectedUsersCount: action.payload };
-    case 'SET_ROUTE_START':
-        return {
-            ...state,
-            routeOrigin: action.payload.origin,
-            routeDestination: action.payload.destination,
-            travelMode: action.payload.travelMode,
-            isRouteLoading: true,
-            routeResult: null,
-            aiRouteSummary: null,
-        };
-    case 'SET_ROUTE_RESULT':
-        return { ...state, routeResult: action.payload, isRouteLoading: false };
-    case 'CLEAR_ROUTE':
-        return {
-            ...state,
-            routeOrigin: null,
-            routeDestination: null,
-            routeResult: null,
-            isRouteLoading: false,
-            aiRouteSummary: null,
-            isAiSummaryLoading: false,
-        };
-    case 'SET_AI_ROUTE_SUMMARY':
-        return { ...state, aiRouteSummary: action.payload, isAiSummaryLoading: false };
-    case 'SET_AI_SUMMARY_LOADING':
-        return { ...state, isAiSummaryLoading: action.payload };
-    case 'SET_VEHICLE_FOCUS':
-        return { ...state, vehicleFocus: action.payload, selectedBusLineId: null };
-    case 'TOGGLE_OPERATOR_INSIGHTS_MODAL':
-        return { ...state, showOperatorInsightsModal: action.payload };
-    case 'TRIGGER_POST_TRIP_REVIEW':
-        return { ...state, postTripReviewData: action.payload };
-    case 'SUBMIT_TRIP_REVIEW': {
-        if (!state.currentUser) return state;
-
-        const { serviceId, review } = action.payload;
-        const newReviewEntry: RatingHistoryEntry = {
-            ...review,
-            userId: state.currentUser.id,
-            timestamp: Date.now(),
-            sentiment: 'unknown', // Will be analyzed by effect
-        };
-
-        const serviceIndex = state.micromobilityServices.findIndex(s => s.id === serviceId);
-        if (serviceIndex === -1) return state;
-
-        const serviceToUpdate = state.micromobilityServices[serviceIndex];
-        const newTotalRatingPoints = serviceToUpdate.totalRatingPoints + review.overallRating;
-        const newNumberOfRatings = serviceToUpdate.numberOfRatings + 1;
-        
-        const updatedService: MicromobilityService = {
-            ...serviceToUpdate,
-            ratingHistory: [newReviewEntry, ...serviceToUpdate.ratingHistory],
-            totalRatingPoints: newTotalRatingPoints,
-            numberOfRatings: newNumberOfRatings,
-            rating: newTotalRatingPoints / newNumberOfRatings,
-            avgPunctuality: ((serviceToUpdate.avgPunctuality * serviceToUpdate.numberOfRatings) + review.scores.punctuality) / newNumberOfRatings,
-            avgSafety: ((serviceToUpdate.avgSafety * serviceToUpdate.numberOfRatings) + review.scores.safety) / newNumberOfRatings,
-            avgCleanliness: ((serviceToUpdate.avgCleanliness * serviceToUpdate.numberOfRatings) + review.scores.cleanliness) / newNumberOfRatings,
-            avgKindness: ((serviceToUpdate.avgKindness * serviceToUpdate.numberOfRatings) + review.scores.kindness) / newNumberOfRatings,
-        };
-
-        const updatedUser = calculateUserProgress(state.currentUser, 50, 20); // Bonus XP for review
-
-        return {
-            ...state,
-            currentUser: updatedUser,
-            micromobilityServices: [
-                ...state.micromobilityServices.slice(0, serviceIndex),
-                updatedService,
-                ...state.micromobilityServices.slice(serviceIndex + 1),
-            ],
-            postTripReviewData: null, // Close review modal
-        };
-    }
-    default:
-      return state;
-  }
-}
-
-const App: React.FC = () => {
-    const [state, dispatch] = useReducer(appReducer, initialState);
-    const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
-    const [locationDashboardData, setLocationDashboardData] = useState<LocationDashboardData | null>(null);
-
-    const mapApiScriptLoaded = useRef(false);
-
-    // --- EFFECT: Initialize Google Maps API ---
-    useEffect(() => {
-        if (mapApiScriptLoaded.current || window.google?.maps) {
-            dispatch({ type: 'SET_MAPS_API_LOADED', payload: true });
-            return;
-        }
-
-        const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
-        if (!GOOGLE_MAPS_API_KEY) {
-            dispatch({ type: 'SET_ERROR', payload: "La clave API de Google Maps no está configurada." });
-            return;
-        }
-
-        window.initMapApp = () => {
-            dispatch({ type: 'SET_MAPS_API_LOADED', payload: true });
-            window.googleMapsApiLoaded = true;
-        };
-        
-        const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=geometry,places&callback=initMapApp`;
-        script.async = true;
-        script.defer = true;
-        script.onerror = () => {
-            dispatch({ type: 'SET_ERROR', payload: "No se pudo cargar el script de Google Maps. Revisa la clave API y la conexión a internet." });
-        };
-        document.head.appendChild(script);
-        mapApiScriptLoaded.current = true;
-
-        return () => { // Cleanup
-            const scripts = document.head.getElementsByTagName('script');
-            for (let i = scripts.length - 1; i >= 0; i--) {
-                if (scripts[i].src.includes('maps.googleapis.com')) {
-                    scripts[i].remove();
-                }
-            }
-             if (window.initMapApp) {
-                delete window.initMapApp;
-            }
-        }
-    }, []);
-
-    // --- EFFECT: Mock data simulation and intervals ---
-    useEffect(() => {
-        if (!state.isAuthenticated) return;
-        
-        const busMovementInterval = setInterval(() => {
-            Object.values(state.buses).forEach(bus => {
-                if (bus.currentLocation) {
-                    dispatch({
-                        type: 'SET_BUS_LOCATION',
-                        payload: {
-                            busLineId: bus.id,
-                            location: {
-                                lat: bus.currentLocation.lat + (Math.random() - 0.5) * 0.001,
-                                lng: bus.currentLocation.lng + (Math.random() - 0.5) * 0.001,
-                            },
-                        },
-                    });
-                }
-            });
-        }, 5000);
-
-        const userCountInterval = setInterval(() => {
-            dispatch({ type: 'UPDATE_CONNECTED_USERS', payload: Math.max(1, state.connectedUsersCount + Math.floor(Math.random() * 3) - 1) });
-        }, 7000);
-
-        const serviceExpiryInterval = setInterval(() => {
-            dispatch({ type: 'DEACTIVATE_EXPIRED_SERVICES' });
-        }, 60 * 1000); // Check every minute
-
-        return () => {
-            clearInterval(busMovementInterval);
-            clearInterval(userCountInterval);
-            clearInterval(serviceExpiryInterval);
-        };
-    }, [state.isAuthenticated, state.buses, state.connectedUsersCount]);
-
-    // --- EFFECT: Get User's Geolocation ---
-    useEffect(() => {
-        if (!state.isAuthenticated) return;
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                setUserLocation({
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude,
-                });
-            },
-            () => {
-                dispatch({ type: 'SET_ERROR', payload: "No se pudo obtener tu ubicación. Funcionalidades como 'Parada más cercana' estarán desactivadas." });
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-        );
-    }, [state.isAuthenticated]);
+        setCurrentUser(profile);
+        const baseSimulatedUsers = Math.floor(Math.random() * 20) + 120; // 120-139
+        setConnectedUsersCount(baseSimulatedUsers + 1);
+        showNotification(t('welcomeMessage', { userName }));
+    };
     
-     // --- EFFECT: Update Location Dashboard Data ---
-    useEffect(() => {
-        if (!userLocation) return;
+    const handleLogout = () => {
+        setCurrentUser(null);
+        setConnectedUsersCount(0);
+    };
+    const handleSelectBus = (busLineId: string) => {
+        setSelectedBusLineId(busLineId);
+        audioService.playHighlightSound();
+    };
+
+    const handleReportSubmit = (report: Report) => {
+        setReports(prev => ({
+            ...prev,
+            [report.busLineId]: [...(prev[report.busLineId] || []), report],
+        }));
+        showNotification('Intel transmitido a la red. Gracias por tu aporte.', 'success');
+    };
+
+    const handleChatMessageSubmit = (message: ChatMessage) => {
+        setChatMessages(prev => ({
+            ...prev,
+            [message.busLineId]: [...(prev[message.busLineId] || []), message],
+        }));
+    };
     
-        const updateDashboard = async () => {
-          const [address, weather] = await Promise.all([
-            getAddressFromCoordinates(userLocation),
-            getWeather()
-          ]);
-    
-          const nearbyReports = state.reports.filter(r => r.location && calculateDistance(userLocation, r.location) < 2); // Reports within ~2km
+    const handleToggleFavoriteBusLine = (busLineId: string) => {
+        if (!currentUser) return;
+        
+        const isFavorite = currentUser.favoriteBusLineIds.includes(busLineId);
+        const updatedFavorites = isFavorite
+          ? currentUser.favoriteBusLineIds.filter(id => id !== busLineId)
+          : [...currentUser.favoriteBusLineIds, busLineId];
           
-          let schedule: ScheduleDetail | null = null;
-          if (state.selectedBusLineId && BUS_LINE_ADDITIONAL_INFO[state.selectedBusLineId]?.operatingHours?.detailed?.[0]) {
-             schedule = BUS_LINE_ADDITIONAL_INFO[state.selectedBusLineId]!.operatingHours!.detailed![0];
-          }
-
-          setLocationDashboardData({
-            location: userLocation,
-            address: address || `${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`,
-            weather,
-            reports: nearbyReports,
-            schedule,
-          });
-        };
+        setCurrentUser({ ...currentUser, favoriteBusLineIds: updatedFavorites });
     
-        updateDashboard();
-        const interval = setInterval(updateDashboard, 60000); // Update every minute
-        return () => clearInterval(interval);
-    
-    }, [userLocation, state.reports, state.selectedBusLineId]);
+        const busName = busLines[busLineId]?.lineName || 'La línea';
+        showNotification(
+            isFavorite ? `${busName} eliminada de favoritos.` : `${busName} añadida a favoritos.`,
+            'success'
+        );
+        audioService.playConfirmationSound();
+    };
 
-    // --- EFFECT: Analyze sentiment of new reports, messages, and reviews ---
-    useEffect(() => {
-        const lastReport = state.reports[0];
-        if (lastReport && lastReport.sentiment === 'unknown') {
-            analyzeSentiment(lastReport.description).then(sentiment => {
-                dispatch({ type: 'SET_SENTIMENT', payload: { id: lastReport.id, type: 'report', sentiment }});
-            });
-        }
-        
-        const lastMicroMsg = state.micromobilityChatMessages[state.micromobilityChatMessages.length - 1];
-        if (lastMicroMsg && lastMicroMsg.sentiment === 'unknown') {
-            analyzeSentiment(lastMicroMsg.text || 'emoji_only').then(sentiment => {
-                dispatch({ type: 'SET_SENTIMENT', payload: { id: lastMicroMsg.id, type: 'globalchat', sentiment }});
-            })
-        }
-        
-        const serviceWithNewReview = state.micromobilityServices.find(s => s.ratingHistory[0]?.sentiment === 'unknown');
-        if (serviceWithNewReview) {
-            const newReview = serviceWithNewReview.ratingHistory[0];
-             analyzeSentiment(newReview.comment || `rating:${newReview.overallRating}`).then(sentiment => {
-                dispatch({ type: 'SET_REVIEW_SENTIMENT', payload: { serviceId: serviceWithNewReview.id, timestamp: newReview.timestamp, sentiment }});
-            });
-        }
-
-    }, [state.reports, state.micromobilityChatMessages, state.micromobilityServices]);
-    
-    // --- EFFECT: Find nearest bus stop ---
-    useEffect(() => {
-        if (!state.selectedBusLineId || !userLocation) {
-            dispatch({ type: 'SET_NEAREST_BUS_STOP', payload: null });
-            return;
-        }
-
-        const stopsForLine = MOCK_BUS_STOPS_DATA[state.selectedBusLineId] || [];
-        if (stopsForLine.length === 0) return;
-
-        let nearestStop: BusStop | null = null;
-        let minDistance = Infinity;
-
-        stopsForLine.forEach(stop => {
-            const dist = calculateDistance(userLocation, stop.location);
-            if (dist < minDistance) {
-                minDistance = dist;
-                nearestStop = stop;
-            }
-        });
-
-        if (nearestStop) {
-            dispatch({ type: 'SET_NEAREST_BUS_STOP', payload: { stop: nearestStop, forBusLineId: state.selectedBusLineId } });
-        }
-
-    }, [state.selectedBusLineId, userLocation]);
-
-
-    // --- EFFECT: Get AI Route Summary ---
-    useEffect(() => {
-        if(state.routeResult && !state.routeResult.error && state.routeOrigin && state.routeDestination && !state.aiRouteSummary) {
-            const fetchSummary = async () => {
-                dispatch({ type: 'SET_AI_SUMMARY_LOADING', payload: true });
-                const [originAddr, destAddr] = await Promise.all([
-                    getAddressFromCoordinates(state.routeOrigin!),
-                    getAddressFromCoordinates(state.routeDestination!)
-                ]);
-
-                const routeInfo = `Duración: ${state.routeResult!.duration}, Distancia: ${state.routeResult!.distance}.`;
-                const nearbyReports = state.reports
-                    .filter(r => r.location && (calculateDistance(state.routeOrigin!, r.location) < 5 || calculateDistance(state.routeDestination!, r.location) < 5))
-                    .map(r => `[${r.type}] ${r.description}`)
-                    .slice(0, 5)
-                    .join('\n');
-
-                try {
-                    const summary = await getAiRouteSummary(originAddr || 'Origen', destAddr || 'Destino', routeInfo, nearbyReports);
-                    dispatch({ type: 'SET_AI_ROUTE_SUMMARY', payload: summary });
-                } catch (e: any) {
-                    dispatch({ type: 'SET_AI_ROUTE_SUMMARY', payload: `Error al generar resumen IA: ${e.message}` });
-                }
-            }
-            fetchSummary();
-        }
-    }, [state.routeResult, state.routeOrigin, state.routeDestination, state.reports, state.aiRouteSummary]);
-
-
-    // --- Handlers ---
-    const handleLogin = useCallback((userName: string) => dispatch({ type: 'LOGIN_SUCCESS', payload: { userName } }), []);
-    const handleLogout = useCallback(() => dispatch({ type: 'LOGOUT' }), []);
-    
-    const handleSubmitReport = useCallback((report: Report) => dispatch({ type: 'ADD_REPORT', payload: report }), []);
-    const handleSendMessage = useCallback((message: ChatMessage) => dispatch({ type: 'ADD_CHAT_MESSAGE', payload: message }), []);
-    const handleSendMicromobilityMessage = useCallback((message: GlobalChatMessage) => dispatch({ type: 'ADD_MICROMOBILITY_CHAT_MESSAGE', payload: message }), []);
-
-    const handleSelectBusLine = useCallback((busLineId: string | null) => dispatch({ type: 'SET_SELECTED_BUS_LINE', payload: busLineId }), []);
-    const handleSendReportFromChat = useCallback((reportType: ReportType, description: string, busLineId: string) => {
-        if (!state.currentUser) return;
-        const newReport: Report = {
+    const handleReportFromChat = (reportType: ReportType, description: string, busLineId: string) => {
+        handleReportSubmit({
             id: `report-chat-${Date.now()}`,
-            userId: state.currentUser.id,
-            userName: state.currentUser.name,
+            userId: currentUser?.id || DEFAULT_USER_ID,
+            userName: currentUser?.name || DEFAULT_USER_NAME,
             busLineId,
             type: reportType,
             timestamp: Date.now(),
             description,
             upvotes: 0,
-            sentiment: 'unknown', // Will be analyzed
-        };
-        dispatch({ type: 'ADD_REPORT', payload: newReport });
-    }, [state.currentUser]);
-
-    const handleAIAssistantSubmit = useCallback(async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!state.aiAssistantQuestion.trim() || !state.selectedBusLineId) return;
-
-        dispatch({ type: 'SET_AI_ASSISTANT_LOADING', payload: true });
-        dispatch({ type: 'SET_AI_ASSISTANT_RESPONSE', payload: null });
-        
-        const busLineName = state.buses[state.selectedBusLineId]?.lineName || 'esta línea';
-        const generalInfo = `Información general: ${BUS_LINE_ADDITIONAL_INFO[state.selectedBusLineId]?.generalDescription || 'No disponible.'}`;
-        const recentReports = state.reports
-            .filter(r => r.busLineId === state.selectedBusLineId)
-            .slice(0, 5)
-            .map(r => `[${r.type} por ${r.userName}]: ${r.description}`)
-            .join('\n');
-        
-        const combinedContext = `${generalInfo}\n\nReportes recientes de usuarios:\n${recentReports || 'Sin reportes recientes.'}`;
+            sentiment: 'unknown',
+        });
+        showNotification(`Reporte rápido de '${reportType}' enviado desde el chat.`, 'info');
+    };
+    
+    const handleSetRoute = useCallback(async (origin: Coordinates, destination: Coordinates, travelMode: TravelMode) => {
+        setIsRouteLoading(true);
+        setRouteResult(null);
+        setAiRouteSummary(null);
+        tripOriginRef.current = origin;
+        tripDestinationRef.current = destination;
         
         try {
-            const response = await getAIAssistantResponse(state.aiAssistantQuestion, busLineName, combinedContext);
-            dispatch({ type: 'SET_AI_ASSISTANT_RESPONSE', payload: response });
-        } catch (error: any) {
-            dispatch({ type: 'SET_ERROR', payload: error.message });
-            dispatch({ type: 'SET_AI_ASSISTANT_LOADING', payload: false });
+            const result = await fetchRoute(origin, destination, travelMode);
+            setRouteResult(result);
+            if (result.error) {
+                showNotification(result.error, 'error');
+            } else {
+                setMapCenter(origin);
+                setMapZoom(14);
+                // Fetch AI summary after route is found
+                setIsAiSummaryLoading(true);
+                const [originAddr, destAddr] = await Promise.all([
+                    getAddressFromCoordinates(origin),
+                    getAddressFromCoordinates(destination)
+                ]);
+                const routeInfo = `Ruta de ${result.distance} en ${result.duration}.`;
+                const summary = await getAiRouteSummary(originAddr || 'origen', destAddr || 'destino', routeInfo, 'No hay reportes de la comunidad en esta zona.');
+                setAiRouteSummary(summary);
+            }
+        } catch (e: any) {
+            showNotification(e.message, 'error');
+        } finally {
+            setIsRouteLoading(false);
+            setIsAiSummaryLoading(false);
         }
-    }, [state.aiAssistantQuestion, state.selectedBusLineId, state.reports, state.buses]);
+    }, [showNotification]);
 
+    const handleFindRouteToBusStop = useCallback((stopName: string) => {
+        if (!userLocation) {
+            showNotification("No podemos calcular la ruta porque tu ubicación no está disponible.", "error");
+            return;
+        }
+        if (!selectedBusLineId) {
+            showNotification("Selecciona una línea de colectivo primero.", "error");
+            return;
+        }
+        
+        const stopsForLine = busStops[selectedBusLineId];
+        const targetStop = stopsForLine?.find(s => s.name === stopName);
 
-    const handleRegisterMicromobility = useCallback((formData: Omit<MicromobilityService, 'id' | 'providerUserId' | 'providerName' | 'isActive' | 'isPendingPayment' | 'isAvailable' | 'isOccupied' | 'registrationTimestamp' | 'subscriptionExpiryTimestamp' | 'completedTrips' | 'rating' | 'totalRatingPoints' | 'numberOfRatings' | 'ratingHistory' | 'avgPunctuality' | 'avgSafety' | 'avgCleanliness' | 'avgKindness' | 'ecoScore'> ) => {
-        if (!state.currentUser) return;
+        if (!targetStop) {
+            showNotification(`No se encontraron las coordenadas para la parada: ${stopName}`, "error");
+            return;
+        }
+
+        showNotification(`Calculando ruta a pie hacia la parada: ${stopName}`, "info");
+        handleSetRoute(userLocation, targetStop.location, 'WALK');
+
+    }, [userLocation, selectedBusLineId, busStops, handleSetRoute, showNotification]);
+
+    const handleClearRoute = () => setRouteResult(null);
+
+    const handleMicromobilitySubmit = (formData: any) => {
+        if (!currentUser) return;
+        if(micromobilityServices.filter(s => s.providerId === currentUser.id).length >= MAX_MICROMOBILITY_SERVICES_PER_PROVIDER) {
+            showNotification('Has alcanzado el límite de servicios de micromovilidad.', 'error');
+            return;
+        }
+
+        const cost = 5000; // Example cost
+        if(currentUser.tokens < cost) {
+            showNotification('No tienes suficientes Fichas para registrar este servicio.', 'error');
+            return;
+        }
+
         const newService: MicromobilityService = {
-            id: `micro-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            providerUserId: state.currentUser.id,
-            providerName: state.currentUser.name,
+            id: `ms-${Date.now()}`,
+            providerId: currentUser.id,
+            providerName: currentUser.name,
             ...formData,
-            isActive: false,
-            isPendingPayment: true,
+            isActive: false, // Must be activated
             isAvailable: false,
             isOccupied: false,
-            registrationTimestamp: Date.now(),
-            subscriptionExpiryTimestamp: null,
-            completedTrips: 0,
+            isPendingPayment: true,
             rating: 0,
-            totalRatingPoints: 0,
             numberOfRatings: 0,
-            ratingHistory: [],
+            totalRatingPoints: 0,
+            completedTrips: 0,
             avgPunctuality: 0,
             avgSafety: 0,
             avgCleanliness: 0,
             avgKindness: 0,
-            ecoScore: Math.floor(Math.random() * 40) + 40, // Random eco score 40-79
+            ecoScore: 75, // Mock
+            ratingHistory: [],
+            subscriptionExpiryTimestamp: Date.now() + formData.subscriptionDurationHours * 3600 * 1000,
         };
-        dispatch({ type: 'ADD_OR_UPDATE_MICROMOBILITY_SERVICE', payload: newService });
-        dispatch({ type: 'TOGGLE_MICROMOBILITY_REGISTRATION_MODAL', payload: false });
-    }, [state.currentUser]);
 
-    const handleSetRoute = useCallback((origin: Coordinates, destination: Coordinates, travelMode: TravelMode) => {
-        dispatch({ type: 'SET_ROUTE_START', payload: { origin, destination, travelMode } });
-    }, []);
-
-    const handleClearRoute = useCallback(() => {
-        dispatch({ type: 'CLEAR_ROUTE' });
-    }, []);
-
-    const handleRouteResult = useCallback((result: RouteResult) => {
-        dispatch({ type: 'SET_ROUTE_RESULT', payload: result });
-    }, []);
-
-    const handleMicromobilityToggle = (serviceId: string, action: 'availability' | 'occupied', currentUserId: string) => {
-      if (action === 'availability') {
-        dispatch({ type: 'TOGGLE_MICROMOBILITY_AVAILABILITY', payload: { serviceId } });
-      } else {
-        dispatch({ type: 'TOGGLE_MICROMOBILITY_OCCUPIED_STATUS', payload: { serviceId, currentUserId } });
-      }
+        setCurrentUser(prev => prev ? ({...prev, tokens: prev.tokens - cost}) : null);
+        setMicromobilityServices(prev => [...prev, newService]);
+        showNotification('Servicio registrado. Actívalo desde el panel para que sea visible.', 'success');
+        setIsMicromobilityRegisterModalOpen(false);
     };
     
-    // --- Memos for derived state ---
-    const mapEvents = useMemo((): MapEvent[] => {
-        const busEvents: MapEvent[] = Object.values(state.buses)
-            .filter(bus => bus.currentLocation)
-            .map(bus => ({
-                id: bus.id,
-                type: 'BUS_LOCATION',
-                location: bus.currentLocation!,
-                busLineId: bus.id,
-                title: bus.lineName,
-                description: bus.description,
-                icon: 'fas fa-bus',
-                color: bus.color,
-                isBus: true,
-            }));
+    const handleRequestMicromobility = useCallback((serviceId: string) => {
+        if (!currentUser) return;
         
-        const reportEvents: MapEvent[] = state.reports
-            .filter(report => report.location)
-            .map(report => ({
-                id: report.id,
-                type: report.type,
-                location: report.location!,
-                busLineId: report.busLineId,
-                title: report.type,
-                description: report.description,
-                icon: REPORT_TYPE_ICONS[report.type] || 'fas fa-info-circle',
-            }));
+        const service = micromobilityServices.find(s => s.id === serviceId);
+        if (!service) return;
 
-        const micromobilityEvents: MapEvent[] = state.micromobilityServices
-            .filter(service => service.isActive && service.isAvailable)
-            .map(service => ({
-                id: service.id,
-                type: service.type === MicromobilityServiceType.Moto ? 'MICROMOBILITY_MOTO' : 'MICROMOBILITY_REMIS',
-                location: service.location,
-                micromobilityServiceId: service.id,
-                title: service.serviceName,
-                description: `Piloto: ${service.providerName}`,
-                icon: MICROMOBILITY_SERVICE_ICONS[service.type],
-                isMicromobility: true,
-                contactInfo: service.whatsapp,
-                isOccupied: service.isOccupied,
-                vehicleModel: service.vehicleModel,
-                vehicleColor: service.vehicleColor,
-                rating: service.rating,
-                ecoScore: service.ecoScore,
-            }));
+        if (service.providerId === currentUser.id) {
+            showNotification('No puedes solicitar tu propio servicio.', 'error');
+            return;
+        }
 
-        return [...reportEvents, ...micromobilityEvents, ...busEvents];
-    }, [state.reports, state.buses, state.micromobilityServices]);
+        setMicromobilityServices(prev => prev.map(s => 
+            s.id === serviceId ? { ...s, isOccupied: true, isAvailable: false } : s
+        ));
 
-    const filteredReports = useMemo(() => {
-        if (!state.selectedBusLineId) return [];
-        return state.reports.filter(r => {
-            const byLine = r.busLineId === state.selectedBusLineId;
-            if (state.reportSentimentFilter === 'all') return byLine;
-            return byLine && r.sentiment === state.reportSentimentFilter;
-        });
-    }, [state.reports, state.selectedBusLineId, state.reportSentimentFilter]);
-    
-    const micromobilityRanking = useMemo(() => {
-        return [...state.micromobilityServices]
-            .filter(s => s.isActive)
-            .sort((a, b) => {
-                if(b.rating !== a.rating) return b.rating - a.rating;
-                return b.completedTrips - a.completedTrips;
-            });
-    }, [state.micromobilityServices]);
-    
-    const isCurrentUserTopRanked = useMemo(() => {
-        if (!state.currentUser) return false;
-        const userServices = micromobilityRanking
-            .filter(s => s.providerUserId === state.currentUser!.id)
-            .map(s => s.id);
-        if (userServices.length === 0) return false;
-        const top5 = micromobilityRanking.slice(0, 5).map(s => s.id);
-        return userServices.some(id => top5.includes(id));
-    }, [micromobilityRanking, state.currentUser]);
-
-
-    // --- Render logic ---
-    if (state.isLoading) {
-        return (
-            <div className="bg-ps-dark-bg min-h-screen flex flex-col items-center justify-center">
-                <LoadingSpinner size="w-24 h-24" />
-                <p className="text-xl text-slate-300 mt-4 font-orbitron">Cargando Red Urbana...</p>
-                 {state.error && <p className="text-red-400 mt-4">{state.error}</p>}
-            </div>
+        showNotification(
+            `¡Servicio solicitado! Contacta a ${service.providerName} para coordinar.`, 
+            'success'
         );
-    }
+        
+        setTimeout(() => {
+            const message = `Hola ${service.providerName}, te contacto desde UppA por tu servicio de ${service.type} - ${service.serviceName}.`;
+            const whatsappUrl = `https://wa.me/${service.whatsapp}?text=${encodeURIComponent(message)}`;
+            window.open(whatsappUrl, '_blank');
+        }, 1000);
+    }, [currentUser, micromobilityServices, showNotification]);
     
-    if (!state.isAuthenticated) {
+    const clearCountdown = useCallback(() => {
+        if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+        }
+    }, []);
+
+    const handleInitiateServiceRequest = (serviceId: string) => {
+        setServiceToConfirm(serviceId);
+        setConfirmationCountdown(60);
+    };
+
+    const handleCancelServiceRequest = () => {
+        clearCountdown();
+        setServiceToConfirm(null);
+    };
+
+    useEffect(() => {
+        if (serviceToConfirm) {
+            countdownIntervalRef.current = setInterval(() => {
+                setConfirmationCountdown(prev => {
+                    if (prev <= 1) {
+                        clearCountdown();
+                        handleRequestMicromobility(serviceToConfirm);
+                        setServiceToConfirm(null);
+                        return 60;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        } else {
+            clearCountdown();
+        }
+
+        return () => clearCountdown();
+    }, [serviceToConfirm, handleRequestMicromobility, clearCountdown]);
+
+
+    const handleSavePreference = (preference: string) => {
+        if (!userPreferences.includes(preference)) {
+            setUserPreferences(prev => [...prev, preference]);
+            showNotification(`Preferencia guardada: "${preference}"`, 'success');
+        }
+    };
+
+    const handleUppySubmit = async (text: string) => {
+        if (!currentUser) return;
+        const userMessage: UppyChatMessage = { role: 'user', text };
+        const newHistory = [...uppyChatHistory, userMessage];
+        setUppyChatHistory(newHistory);
+        setIsUppyLoading(true);
+
+        try {
+            const context = `Línea de colectivo actual: ${selectedBus?.lineName || 'Ninguna seleccionada'}.`;
+
+            const relevantReports = (selectedBusLineId ? reports[selectedBusLineId] : []) || [];
+            const TWO_DAYS_MS = 48 * 60 * 60 * 1000;
+            const recentReports = relevantReports.filter(r => (Date.now() - r.timestamp) < TWO_DAYS_MS);
+    
+            const formatTimeAgo = (timestamp: number) => {
+                const now = Date.now();
+                const seconds = Math.floor((now - timestamp) / 1000);
+                if (seconds < 60) return `hace segundos`;
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return `hace ${minutes} min`;
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return `hace ${hours} hr`;
+                const days = Math.floor(hours / 24);
+                return `hace ${days} día(s)`;
+            };
+    
+            const reportSummary = recentReports.length > 0
+                ? recentReports
+                    .slice(-10) 
+                    .map(r => `- Reporte de '${r.type}' (Sentimiento: ${r.sentiment}) con descripción "${r.description}". Ocurrió ${formatTimeAgo(r.timestamp)}.`)
+                    .join('\n')
+                : "No se han registrado reportes de la comunidad en los últimos 2 días.";
+            
+            const preferencesSummary = userPreferences.length > 0
+                ? userPreferences.map(p => `- ${p}`).join('\n')
+                : "El usuario no ha especificado preferencias.";
+
+            const instruction = getUppySystemInstruction(currentUser.name, context, reportSummary, preferencesSummary);
+            
+            const geminiHistory = newHistory.map(m => ({
+                role: m.role === 'model' ? 'model' : 'user',
+                parts: [{ text: m.text }]
+            }));
+
+            const response = await getUppyResponse(instruction, geminiHistory);
+            
+            const functionCall = response.candidates?.[0]?.content?.parts.find(p => p.functionCall)?.functionCall;
+
+            if (functionCall) {
+                const { name, args } = functionCall;
+                let functionResponseResult: any;
+
+                if (name === 'getWeatherForLocation' && args.location) {
+                    const weather = await getWeatherByLocationName(String(args.location));
+                    functionResponseResult = { weather };
+                } else if (name === 'saveUserPreference' && args.preference) {
+                    const preferenceToSave = String(args.preference);
+                    handleSavePreference(preferenceToSave);
+                    functionResponseResult = { status: 'success', message: `Preferencia '${preferenceToSave}' guardada.` };
+                } else {
+                    functionResponseResult = { status: 'error', message: `Función desconocida: ${name}` };
+                }
+
+                const funcResponsePart = {
+                    functionResponse: {
+                        name: name,
+                        response: { name: name, content: functionResponseResult }
+                    }
+                };
+
+                const historyWithFuncCall = [...geminiHistory, response.candidates[0].content, { role: 'function', parts: [funcResponsePart] }];
+                const finalResponse = await getUppyResponse(instruction, historyWithFuncCall);
+                setUppyChatHistory(prev => [...prev, { role: 'model', text: finalResponse.text }]);
+            } else {
+                setUppyChatHistory(prev => [...prev, { role: 'model', text: response.text }]);
+            }
+        } catch (e: any) {
+            setUppyChatHistory(prev => [...prev, { role: 'model', text: `Lo siento, estoy teniendo problemas para conectar. ${e.message}` }]);
+        } finally {
+            setIsUppyLoading(false);
+        }
+    };
+    
+    const handleReviewSubmit = async (review: Omit<RatingHistoryEntry, 'userId' | 'timestamp' | 'sentiment'>) => {
+        if (!serviceToReview || !currentUser) return;
+    
+        const sentiment = await analyzeSentiment(review.comment || `Calificación: ${review.overallRating}`);
+        
+        const newReviewEntry: RatingHistoryEntry = {
+            ...review,
+            userId: currentUser.id,
+            timestamp: Date.now(),
+            sentiment,
+        };
+
+        setMicromobilityServices(prevServices => prevServices.map(s => {
+            if (s.id === serviceToReview.id) {
+                const newTotalPoints = s.totalRatingPoints + newReviewEntry.overallRating;
+                const newNumberOfRatings = s.numberOfRatings + 1;
+                
+                const newAvgPunctuality = ((s.avgPunctuality * s.numberOfRatings) + review.scores.punctuality) / newNumberOfRatings;
+                const newAvgSafety = ((s.avgSafety * s.numberOfRatings) + review.scores.safety) / newNumberOfRatings;
+                const newAvgCleanliness = ((s.avgCleanliness * s.numberOfRatings) + review.scores.cleanliness) / newNumberOfRatings;
+                const newAvgKindness = ((s.avgKindness * s.numberOfRatings) + review.scores.kindness) / newNumberOfRatings;
+
+                return {
+                    ...s,
+                    totalRatingPoints: newTotalPoints,
+                    numberOfRatings: newNumberOfRatings,
+                    rating: newTotalPoints / newNumberOfRatings,
+                    ratingHistory: [...s.ratingHistory, newReviewEntry],
+                    avgPunctuality: newAvgPunctuality,
+                    avgSafety: newAvgSafety,
+                    avgCleanliness: newAvgCleanliness,
+                    avgKindness: newAvgKindness,
+                };
+            }
+            return s;
+        }));
+
+        showNotification('Evaluación enviada. ¡Gracias por tu feedback!', 'success');
+        setIsPostTripReviewModalOpen(false);
+        setServiceToReview(null);
+    };
+
+    const handleNavigateToPoint = (destination: Coordinates, travelMode: TravelMode) => {
+        if (!userLocation) {
+            showNotification("No podemos trazar la ruta porque tu ubicación no está disponible.", "error");
+            return;
+        }
+        showNotification(`Trazando ruta al punto de interés...`, "info");
+        handleSetRoute(userLocation, destination, travelMode);
+    };
+
+    // EFFECTS
+    useEffect(() => {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                setUserLocation(coords);
+                setMapCenter(coords);
+                getWeather(coords).then(setWeatherData);
+            },
+            () => {
+                showNotification('No se pudo obtener tu ubicación. Algunas funciones estarán limitadas.', 'error');
+                getWeather(DEFAULT_MAP_CENTER).then(setWeatherData);
+            }
+        );
+
+        const today = new Date().getDay();
+        const dayKey = (today > 0 && today < 6) ? 'Lunes a Viernes' : today === 6 ? 'Sábado' : 'Domingo';
+        const scheduleInfo = BUS_LINE_ADDITIONAL_INFO["LINEA_228CB"]?.operatingHours.detailed.find(d => d.days === dayKey);
+        if(scheduleInfo) setBusSchedule(scheduleInfo);
+        
+    }, [showNotification, t]);
+
+    useEffect(() => {
+        if (!currentUser) return; 
+
+        const intervalId = setInterval(() => {
+            setConnectedUsersCount(prevCount => {
+                const fluctuation = Math.floor(Math.random() * 5) - 2;
+                const newCount = prevCount + fluctuation;
+                return Math.max(1, newCount); 
+            });
+        }, 5000); 
+
+        return () => clearInterval(intervalId);
+    }, [currentUser]);
+
+
+    // RENDER LOGIC
+    if (!currentUser) {
         return <LoginPage onLogin={handleLogin} />;
     }
 
-    const { currentUser, selectedBusLineId } = state;
-
     return (
-        <div className="bg-ps-dark-bg text-slate-100 font-sans min-h-screen flex flex-col">
-            <Navbar 
-                appName="UppA"
+        <>
+            {notification && <ErrorToast notification={notification} onClose={() => setNotification(null)} />}
+            
+            <Navbar
+                appName={t('appName')}
                 currentUser={currentUser}
                 onLogout={handleLogout}
-                onOpenRanking={() => dispatch({ type: 'TOGGLE_RANKING_MODAL', payload: true })}
-                connectedUsersCount={state.connectedUsersCount}
-                onFocusUserLocation={() => setUserLocation({ ...userLocation! })}
-                isTopRanked={isCurrentUserTopRanked}
+                onOpenRanking={() => showNotification("El ranking de pilotos aún está en desarrollo.")}
+                connectedUsersCount={connectedUsersCount}
+                onFocusUserLocation={() => userLocation && setMapCenter(userLocation)}
+                onToggleMicromobilityModal={() => setIsOperatorInsightsModalOpen(true)}
+                isTopRanked={isTopRankedUser}
             />
-            {state.error && <div className="bg-red-800 text-center p-2 text-white">{state.error} <button onClick={() => dispatch({type: 'SET_ERROR', payload: null})} className="ml-4 font-bold">X</button></div>}
 
-            <main className="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 p-4">
-                {/* Left Panel */}
-                <div className="lg:col-span-3 ps-panel flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-blue-500/20">
-                        <h2 className="text-xl font-bold font-audiowide text-blue-300">Nexo Operativo</h2>
-                        <div className="flex justify-around bg-slate-900/50 p-1 rounded-md mt-3">
-                           <button onClick={() => dispatch({ type: 'SET_VEHICLE_FOCUS', payload: 'bus' })} className={`flex-1 ps-button-toggle ${state.vehicleFocus === 'bus' ? 'active': ''}`}><WireframeBusIcon className="w-6 h-6 mr-2"/> Colectivos</button>
-                           <button onClick={() => dispatch({ type: 'SET_VEHICLE_FOCUS', payload: 'moto' })} className={`flex-1 ps-button-toggle ${state.vehicleFocus === 'moto' ? 'active': ''}`}><WireframeMotoIcon className="w-6 h-6 mr-2"/> Motos</button>
-                           <button onClick={() => dispatch({ type: 'SET_VEHICLE_FOCUS', payload: 'remis' })} className={`flex-1 ps-button-toggle ${state.vehicleFocus === 'remis' ? 'active': ''}`}><WireframeCarIcon className="w-6 h-6 mr-2"/> Remises</button>
+            <main className="main-layout">
+                <div className="control-deck overflow-y-auto scrollbar-thin">
+                   <div className="ps-card p-4">
+                        <div className="flex space-x-2 mb-4">
+                            <button 
+                                onClick={() => setActiveTab('transport')}
+                                className={`ps-button flex-1 ${activeTab === 'transport' ? 'active' : ''}`}
+                            >
+                                <i className="fas fa-bus-alt mr-2"></i> Transporte Público
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('pilot')}
+                                className={`ps-button flex-1 ${activeTab === 'pilot' ? 'active' : ''}`}
+                            >
+                               <i className="fas fa-motorcycle mr-2"></i> Mi Flota
+                            </button>
                         </div>
-                    </div>
-                    <div className="flex-grow overflow-y-auto p-4 space-y-4">
-                        {state.vehicleFocus === 'bus' && (
-                            <div className="space-y-2">
-                                {Object.values(state.buses).map(bus => (
-                                    <button
-                                        key={bus.id}
-                                        onClick={() => handleSelectBusLine(bus.id === selectedBusLineId ? null : bus.id)}
-                                        className={`w-full text-left p-3 rounded-md transition-all duration-200 border-l-4 ${bus.color} ${selectedBusLineId === bus.id ? 'bg-blue-500/30 border-blue-400' : 'bg-slate-800/70 border-transparent hover:bg-slate-700/90'}`}
-                                    >
-                                        <p className="font-bold text-white">{bus.lineName}</p>
-                                        <p className="text-xs text-slate-400">{bus.description}</p>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
 
-                        {(state.vehicleFocus === 'moto' || state.vehicleFocus === 'remis') && (
-                             <div>
-                                <button onClick={() => dispatch({type: 'TOGGLE_MICROMOBILITY_REGISTRATION_MODAL', payload: true})} className="w-full ps-button active mb-4">
-                                   <i className="fas fa-plus-circle mr-2"></i> Registrar Mi Servicio
-                                </button>
-                                <div className="space-y-3">
-                                {micromobilityRanking
-                                    .filter(s => s.type.toLowerCase() === state.vehicleFocus)
-                                    .map(service => (
-                                    <MicromobilityServiceCard
-                                        key={service.id}
-                                        service={service}
-                                        isOwnService={service.providerUserId === currentUser?.id}
-                                        onToggleAvailability={(id) => handleMicromobilityToggle(id, 'availability', currentUser!.id)}
-                                        onToggleOccupied={(id) => handleMicromobilityToggle(id, 'occupied', currentUser!.id)}
-                                        onConfirmPayment={(id) => dispatch({type: 'CONFIRM_MICROMOBILITY_PAYMENT', payload: {serviceId: id}})}
-                                        onContact={(whatsapp) => window.open(`https://wa.me/${whatsapp.replace(/\D/g, '')}`, '_blank')}
-                                        chatMessages={state.micromobilityChatMessages}
-                                        onSendMessage={handleSendMicromobilityMessage}
-                                        currentUser={currentUser!}
-                                    />
-                                ))}
-                                </div>
-                             </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Center Panel (Map) */}
-                <div className="lg:col-span-6 ps-panel h-[60vh] lg:h-auto overflow-hidden">
-                    <MapDisplay
-                        isGoogleMapsApiLoaded={state.isGoogleMapsApiLoaded}
-                        events={mapEvents}
-                        buses={state.buses}
-                        busStops={Object.values(MOCK_BUS_STOPS_DATA).flat()}
-                        selectedBusLineId={selectedBusLineId}
-                        className="w-full h-full"
-                        onBusClick={handleSelectBusLine}
-                        nearestBusStop={state.nearestBusStop}
-                        routeOrigin={state.routeOrigin}
-                        routeDestination={state.routeDestination}
-                        onRouteResult={handleRouteResult}
-                        userLocationFocus={userLocation}
-                        travelMode={state.travelMode}
-                    />
-                </div>
-
-                {/* Right Panel */}
-                <div className="lg:col-span-3 ps-panel flex flex-col overflow-hidden">
-                     <div className="p-4 border-b border-blue-500/20">
-                         <h2 className="text-xl font-bold font-audiowide text-blue-300">
-                             {selectedBusLineId ? `Intel: ${state.buses[selectedBusLineId]?.lineName}` : 'Planificador Global'}
-                         </h2>
-                     </div>
-                     <div className="p-4 flex-grow overflow-y-auto">
-                        {selectedBusLineId && (
-                            <div className="h-full flex flex-col space-y-4">
-                                <div className="flex-grow">
-                                     <ChatWindow
-                                        busLineId={selectedBusLineId}
-                                        messages={state.chatMessages[selectedBusLineId] || []}
-                                        currentUser={currentUser!}
-                                        onSendMessage={handleSendMessage}
-                                        onSendReportFromChat={handleSendReportFromChat}
-                                        onToggleCalculator={() => dispatch({type: 'TOGGLE_CALCULATOR_MODAL', payload: true})}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <button onClick={() => dispatch({type: 'TOGGLE_REPORT_MODAL', payload: true})} className="w-full ps-button active">
-                                        <i className="fas fa-bullhorn mr-2"></i> Reportar Intel
-                                    </button>
-                                     <form onSubmit={handleAIAssistantSubmit} className="space-y-2">
-                                        <textarea
-                                            value={state.aiAssistantQuestion}
-                                            onChange={e => dispatch({type: 'SET_AI_ASSISTANT_QUESTION', payload: e.target.value})}
-                                            placeholder="Pregúntale a UppA sobre esta línea..."
-                                            rows={2}
-                                            className="w-full ps-input text-sm"
-                                        />
-                                        <button type="submit" disabled={state.isAIAssistantLoading} className="w-full ps-button">
-                                            {state.isAIAssistantLoading ? <LoadingSpinner size="w-5 h-5"/> : <><i className="fas fa-magic mr-2"></i> Consultar IA</>}
-                                        </button>
-                                     </form>
-                                     {state.aiAssistantResponse && (
-                                         <div className="p-3 bg-indigo-900/40 border-l-4 border-indigo-500 rounded-r-md">
-                                            <p className="text-sm text-gray-200 whitespace-pre-wrap">{state.aiAssistantResponse}</p>
-                                         </div>
-                                     )}
-                                </div>
-                            </div>
-                        )}
-                        {!selectedBusLineId && locationDashboardData && (
-                            state.routeOrigin ? (
-                                <TripPlanner
-                                    isGoogleMapsApiLoaded={state.isGoogleMapsApiLoaded}
+                        {activeTab === 'transport' && (
+                            <div className="space-y-4 animate-[preloader-fade-in_0.5s_ease-out]">
+                                <TripPlanner 
                                     onSetRoute={handleSetRoute}
                                     onClearRoute={handleClearRoute}
-                                    onShowRecentReports={() => dispatch({type: 'TOGGLE_RECENT_REPORTS_MODAL', payload: true})}
-                                    routeResult={state.routeResult}
-                                    isRouteLoading={state.isRouteLoading}
-                                    aiRouteSummary={state.aiRouteSummary}
-                                    isAiSummaryLoading={state.isAiSummaryLoading}
+                                    routeResult={routeResult}
+                                    isRouteLoading={isRouteLoading}
+                                    aiRouteSummary={aiRouteSummary}
+                                    isAiSummaryLoading={isAiSummaryLoading}
+                                    onShowRecentReports={() => showNotification("La visualización de reportes en ruta está en desarrollo.")}
                                 />
-                            ) : (
-                                <LocationDashboard data={locationDashboardData} />
-                            )
+                                <AvailableServices
+                                    services={availableServices}
+                                    currentUser={currentUser}
+                                    serviceToConfirm={serviceToConfirm}
+                                    confirmationCountdown={confirmationCountdown}
+                                    onInitiateRequest={handleInitiateServiceRequest}
+                                    onCancelRequest={handleCancelServiceRequest}
+                                />
+                                <PointsOfInterest onNavigate={handleNavigateToPoint} />
+                                <div className="space-y-4 mt-4">
+                                     {favoriteBuses.length > 0 && (
+                                        <div className="space-y-4">
+                                            <h3 className="text-xl font-orbitron text-blue-300 border-b border-blue-500/20 pb-2">⭐ Mis Favoritos</h3>
+                                            {favoriteBuses.map((bus) => (
+                                                <BusCard
+                                                    key={bus.id}
+                                                    bus={bus}
+                                                    isSelected={selectedBusLineId === bus.id}
+                                                    onSelect={() => handleSelectBus(bus.id)}
+                                                    onReport={() => setIsReportModalOpen(true)}
+                                                    details={selectedBusLineId === bus.id ? selectedBusDetails : null}
+                                                    isFavorite={true}
+                                                    onToggleFavorite={() => handleToggleFavoriteBusLine(bus.id)}
+                                                    onFindRouteToStop={handleFindRouteToBusStop}
+                                                >
+                                                     {selectedBusLineId === bus.id && (
+                                                        <div className="space-y-4">
+                                                            <LocationDashboard 
+                                                                busLineName={bus.lineName}
+                                                                data={{weather: weatherData, reports: reports[bus.id] || [], schedule: busSchedule}}
+                                                            />
+                                                            <div className="ps-card p-4">
+                                                                <h3 className="text-md font-bold text-blue-300 font-orbitron mb-3">Herramientas de Comunicación</h3>
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                    <button onClick={() => setIsChatModalOpen(true)} className="ps-button active py-3 text-base">
+                                                                        <i className="fas fa-comments mr-2"></i> Chat de Línea
+                                                                    </button>
+                                                                    <button onClick={() => setIsUppyModalOpen(true)} className="ps-button active py-3 text-base">
+                                                                        <i className="fas fa-robot mr-2"></i> Asistente UppY
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </BusCard>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
+                                        {favoriteBuses.length > 0 && <h3 className="text-lg font-orbitron text-slate-400 border-b border-slate-700/80 pb-2">Otras Líneas</h3>}
+                                        {otherBuses.map((bus) => (
+                                            <BusCard
+                                                key={bus.id}
+                                                bus={bus}
+                                                isSelected={selectedBusLineId === bus.id}
+                                                onSelect={() => handleSelectBus(bus.id)}
+                                                onReport={() => setIsReportModalOpen(true)}
+                                                details={selectedBusLineId === bus.id ? selectedBusDetails : null}
+                                                isFavorite={false}
+                                                onToggleFavorite={() => handleToggleFavoriteBusLine(bus.id)}
+                                                onFindRouteToStop={handleFindRouteToBusStop}
+                                            >
+                                                {selectedBusLineId === bus.id && (
+                                                    <div className="space-y-4">
+                                                        <LocationDashboard 
+                                                            busLineName={bus.lineName}
+                                                            data={{weather: weatherData, reports: reports[bus.id] || [], schedule: busSchedule}}
+                                                        />
+                                                        <div className="ps-card p-4">
+                                                            <h3 className="text-md font-bold text-blue-300 font-orbitron mb-3">Herramientas de Comunicación</h3>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                <button onClick={() => setIsChatModalOpen(true)} className="ps-button active py-3 text-base">
+                                                                    <i className="fas fa-comments mr-2"></i> Chat de Línea
+                                                                </button>
+                                                                <button onClick={() => setIsUppyModalOpen(true)} className="ps-button active py-3 text-base">
+                                                                    <i className="fas fa-robot mr-2"></i> Asistente UppY
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </BusCard>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
                         )}
-                         {!selectedBusLineId && !locationDashboardData && (
-                             <TripPlanner
-                                isGoogleMapsApiLoaded={state.isGoogleMapsApiLoaded}
-                                onSetRoute={handleSetRoute}
-                                onClearRoute={handleClearRoute}
-                                onShowRecentReports={() => dispatch({type: 'TOGGLE_RECENT_REPORTS_MODAL', payload: true})}
-                                routeResult={state.routeResult}
-                                isRouteLoading={state.isRouteLoading}
-                                aiRouteSummary={state.aiRouteSummary}
-                                isAiSummaryLoading={state.isAiSummaryLoading}
-                            />
-                         )}
-                     </div>
-                     <div className="p-4 border-t border-blue-500/20 flex justify-end">
-                        <button onClick={() => dispatch({ type: 'TOGGLE_OPERATOR_INSIGHTS_MODAL', payload: true })} className="ps-button"><i className="fas fa-chart-line mr-2"></i>Insights</button>
-                     </div>
+                        
+                        {activeTab === 'pilot' && (
+                            <div className="space-y-4 animate-[preloader-fade-in_0.5s_ease-out]">
+                                <RankingTable services={micromobilityServices} currentUser={currentUser} />
+                                <MicromobilityChat 
+                                    isOpen={isMicromobilityPanelOpen}
+                                    onToggle={() => setIsMicromobilityPanelOpen(!isMicromobilityPanelOpen)}
+                                    hasAvailableServices={hasAvailableMicromobility}
+                                    onOpenChat={() => setIsMicromobilityChatModalOpen(true)}
+                                />
+                                <div className="ps-card p-4 space-y-3">
+                                     <h3 className="text-lg font-bold text-blue-300 font-orbitron">Registra tu Servicio de Micromovilidad Moto o Remis</h3>
+                                     <button onClick={() => setIsMicromobilityRegisterModalOpen(true)} className="w-full ps-button active">
+                                        <i className="fas fa-plus-circle mr-2"></i> Registrar Servicio
+                                     </button>
+                                     {micromobilityServices.filter(s => s.providerId === currentUser.id).map(service => (
+                                         <MicromobilityServiceCard 
+                                            key={service.id}
+                                            service={service}
+                                            isOwnService={true}
+                                            currentUser={currentUser}
+                                            chatMessages={globalChatMessages}
+                                            onSendMessage={(msg) => setGlobalChatMessages(prev => [...prev, msg])}
+                                            onConfirmPayment={(serviceId) => {
+                                                setMicromobilityServices(prev => prev.map(s => s.id === serviceId ? {...s, isPendingPayment: false, isActive: true, isAvailable: true} : s));
+                                                showNotification('¡Servicio activado! Ahora eres visible en el mapa.', 'success');
+                                            }}
+                                            onToggleAvailability={(serviceId) => {
+                                                setMicromobilityServices(prev => prev.map(s => s.id === serviceId ? {...s, isAvailable: !s.isAvailable} : s));
+                                            }}
+                                            onToggleOccupied={(serviceId) => {
+                                                const service = micromobilityServices.find(s=>s.id === serviceId);
+                                                if(service && !service.isOccupied){
+                                                    setServiceToReview(service);
+                                                    setIsPostTripReviewModalOpen(true);
+                                                }
+                                                 setMicromobilityServices(prev => prev.map(s => s.id === serviceId ? {...s, isOccupied: !s.isOccupied } : s));
+                                            }}
+                                         />
+                                     ))}
+                                      {micromobilityServices.filter(s => s.providerId === currentUser.id).length === 0 && (
+                                        <p className="text-center text-sm text-slate-400 italic py-4">No tienes servicios registrados.</p>
+                                      )}
+                                </div>
+                            </div>
+                        )}
+                   </div>
+                </div>
+
+                <div className="interactive-display-wrapper ps-card overflow-hidden">
+                    {isMapError ? (
+                        <MapErrorDisplay errorMessage={isMapError} />
+                    ) : (
+                        <MapDisplay
+                            center={mapCenter}
+                            zoom={mapZoom}
+                            userLocation={userLocation}
+                            busStops={[]}
+                            selectedBus={selectedBus}
+                            reports={selectedBusLineId ? reports[selectedBusLineId] || [] : []}
+                            micromobilityServices={micromobilityServices}
+                            routeGeometry={routeResult?.geometry || null}
+                            onMapError={setIsMapError}
+                            onMapReady={() => setIsMapReady(true)}
+                        />
+                    )}
                 </div>
             </main>
+
+            {/* MODALS */}
+            <Modal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} title="Transmitir Intel a la Red">
+                {selectedBus && <ReportForm busLineId={selectedBus.id} currentUser={currentUser} onSubmit={handleReportSubmit} onClose={() => setIsReportModalOpen(false)} />}
+            </Modal>
             
-            {/* Modals */}
-            <Modal isOpen={state.showReportModal} onClose={() => dispatch({type: 'TOGGLE_REPORT_MODAL', payload: false})} title="Transmitir Nuevo Intel">
-                {selectedBusLineId && currentUser ? (
-                    <ReportForm
-                        busLineId={selectedBusLineId}
+            {/* CHAT MODAL */}
+            {selectedBus && (
+                <Modal 
+                    isOpen={isChatModalOpen} 
+                    onClose={() => setIsChatModalOpen(false)} 
+                    title={`Chat de Línea: ${selectedBus.lineName}`}
+                >
+                    <div style={{ height: '70vh', minHeight: '400px' }}>
+                        <ChatWindow
+                            busLineId={selectedBus.id}
+                            messages={chatMessages[selectedBus.id] || []}
+                            currentUser={currentUser}
+                            onSendMessage={handleChatMessageSubmit}
+                            onSendReportFromChat={handleReportFromChat}
+                            onToggleCalculator={() => {
+                                setIsChatModalOpen(false);
+                                setIsCalculatorModalOpen(true);
+                            }}
+                        />
+                    </div>
+                </Modal>
+            )}
+
+            {/* UPPY ASSISTANT MODAL */}
+            <Modal 
+                isOpen={isUppyModalOpen} 
+                onClose={() => setIsUppyModalOpen(false)} 
+                title="Asistente UppY"
+            >
+                <div style={{ height: '70vh', minHeight: '400px' }}>
+                    <UppyAssistant
                         currentUser={currentUser}
-                        onSubmit={handleSubmitReport}
-                        onClose={() => dispatch({type: 'TOGGLE_REPORT_MODAL', payload: false})}
+                        chatHistory={uppyChatHistory}
+                        isLoading={isUppyLoading}
+                        isVoiceEnabled={isVoiceEnabled}
+                        onSubmit={handleUppySubmit}
+                        onToggleVoice={setIsVoiceEnabled}
                     />
-                ) : <p>Por favor selecciona una línea de colectivo para reportar.</p>}
-            </Modal>
-             <Modal isOpen={state.showMicromobilityRegistrationModal} onClose={() => dispatch({type: 'TOGGLE_MICROMOBILITY_REGISTRATION_MODAL', payload: false})} title="Registrar Servicio de Micromovilidad">
-                {currentUser && <MicromobilityRegistrationModal currentUser={currentUser} onSubmit={handleRegisterMicromobility} onClose={() => dispatch({type: 'TOGGLE_MICROMOBILITY_REGISTRATION_MODAL', payload: false})} />}
-            </Modal>
-             <Modal isOpen={state.showRankingModal} onClose={() => dispatch({ type: 'TOGGLE_RANKING_MODAL', payload: false })} title="Ranking de Pilotos">
-                <div className="space-y-3">
-                    {micromobilityRanking.length > 0 ? micromobilityRanking.map((s, index) => (
-                        <div key={s.id} className="flex items-center p-2 bg-slate-800/50 rounded-md">
-                            <span className="font-bold text-lg w-8 text-center">{index + 1}</span>
-                            <img src={`https://api.dicebear.com/8.x/bottts-neutral/svg?seed=${encodeURIComponent(s.providerName)}`} alt={s.providerName} className="w-10 h-10 rounded-full mx-3" />
-                            <div className="flex-grow">
-                                <p className="font-semibold text-white">{s.providerName}</p>
-                                <p className="text-xs text-slate-400">{s.serviceName}</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-yellow-400 font-bold"><i className="fas fa-star mr-1"></i>{s.rating.toFixed(2)}</p>
-                                <p className="text-xs text-slate-400">{s.completedTrips} viajes</p>
-                            </div>
-                        </div>
-                    )) : <p className="text-center text-slate-400">Aún no hay servicios en el ranking.</p>}
                 </div>
             </Modal>
-            <CalculatorModal isOpen={state.showCalculatorModal} onClose={() => dispatch({type: 'TOGGLE_CALCULATOR_MODAL', payload: false})} />
+            
+            {/* MICROMOBILITY CHAT MODAL */}
+            <Modal 
+                isOpen={isMicromobilityChatModalOpen} 
+                onClose={() => setIsMicromobilityChatModalOpen(false)} 
+                title="Nexo Micromovilidad"
+            >
+                <div style={{ height: '70vh', minHeight: '400px' }}>
+                    <MicromobilityChatWindow
+                        messages={globalChatMessages}
+                        currentUser={currentUser}
+                        onSendMessage={(msg) => setGlobalChatMessages(prev => [...prev, msg])}
+                    />
+                </div>
+            </Modal>
 
-             {state.postTripReviewData && state.micromobilityServices.find(s => s.id === state.postTripReviewData?.serviceId) && currentUser &&
-                <PostTripReviewModal 
-                    isOpen={!!state.postTripReviewData}
-                    onClose={() => dispatch({ type: 'TRIGGER_POST_TRIP_REVIEW', payload: null })}
-                    onSubmit={(review) => dispatch({ type: 'SUBMIT_TRIP_REVIEW', payload: { serviceId: state.postTripReviewData!.serviceId, review }})}
-                    service={state.micromobilityServices.find(s => s.id === state.postTripReviewData!.serviceId)!}
-                    currentUser={currentUser}
-                />
-            }
-             <OperatorInsightsModal 
-                isOpen={state.showOperatorInsightsModal}
-                onClose={() => dispatch({ type: 'TOGGLE_OPERATOR_INSIGHTS_MODAL', payload: false })}
-                services={state.micromobilityServices}
-            />
-        </div>
+            <Modal isOpen={isMicromobilityRegisterModalOpen} onClose={() => setIsMicromobilityRegisterModalOpen(false)} title="Registrar Servicio de Micromovilidad">
+                <MicromobilityRegistrationModal currentUser={currentUser} onSubmit={handleMicromobilitySubmit} onClose={() => setIsMicromobilityRegisterModalOpen(false)} />
+            </Modal>
+            <OperatorInsightsModal isOpen={isOperatorInsightsModalOpen} onClose={() => setIsOperatorInsightsModalOpen(false)} services={micromobilityServices} />
+            <CalculatorModal isOpen={isCalculatorModalOpen} onClose={() => setIsCalculatorModalOpen(false)} />
+            {serviceToReview && (
+              <PostTripReviewModal
+                isOpen={isPostTripReviewModalOpen}
+                onClose={() => setIsPostTripReviewModalOpen(false)}
+                service={serviceToReview}
+                currentUser={currentUser}
+                onSubmit={handleReviewSubmit}
+              />
+            )}
+            <AccessibilityControls />
+        </>
     );
 };
 

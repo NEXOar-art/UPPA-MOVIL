@@ -2,6 +2,7 @@
 
 
 
+
 import React, { useState, useCallback } from 'react';
 import { MicromobilityService, MicromobilityServiceType, GlobalChatMessage, UserProfile, RatingHistoryEntry } from '../types';
 import { MICROMOBILITY_SERVICE_ICONS, UPPA_MERCADO_PAGO_ALIAS, UPPA_CRYPTO_ADDRESS_EXAMPLE } from '../constants';
@@ -155,6 +156,9 @@ const MicromobilityServiceCard: React.FC<MicromobilityServiceCardProps> = ({
           <h4 className={`text-md font-semibold text-white flex items-center`}>
             <i className={`${MICROMOBILITY_SERVICE_ICONS[service.type]} ${iconColor} mr-2 text-lg`}></i>
             {service.serviceName}
+             {service.petsAllowed && (
+                <i className="fas fa-paw text-cyan-300 icon-pet-glow text-base ml-2" title="Mascotas Bienvenidas"></i>
+            )}
           </h4>
           <p className="text-xs text-slate-400">{isOwnService ? 'Mi Servicio' : service.providerName} ({service.type})</p>
         </div>

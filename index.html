@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -9,8 +10,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Heatmap.js & Leaflet-Heat Plugin -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/heatmap.js/2.0.2/heatmap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
   <style>
     :root {
+      /* Default theme is dark */
       --ps-blue: #00bfff; /* DeepSkyBlue */
       --ps-cyan: #00ffff;
       --ps-magenta: #ff00ff;
@@ -23,6 +32,87 @@
       --ps-text: #e0e8f0;
       --ps-text-dim: #8c9bb6;
     }
+
+    /* Light Theme */
+    body.theme-light {
+      --ps-blue: #007bff;
+      --ps-cyan: #17a2b8;
+      --ps-magenta: #e83e8c;
+      --ps-lime: #28a745;
+      --ps-glow: rgba(0, 123, 255, 0.6);
+      --ps-glow-soft: rgba(0, 123, 255, 0.3);
+      --ps-dark-bg: #f4f7fa;
+      --ps-panel-bg: rgba(255, 255, 255, 0.8);
+      --ps-border: rgba(0, 0, 0, 0.1);
+      --ps-text: #212529;
+      --ps-text-dim: #6c757d;
+    }
+    body.theme-light .ps-card {
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1), inset 0 0 0 1px var(--ps-border);
+    }
+    body.theme-light .ps-button {
+      background: rgba(230, 238, 245, 0.5);
+      border: 1px solid var(--ps-border);
+      color: var(--ps-text);
+      text-shadow: none;
+    }
+    body.theme-light .ps-button:hover {
+        color: #000;
+        border-color: var(--ps-blue);
+        background: rgba(0, 123, 255, 0.1);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1), 0 0 10px var(--ps-glow-soft);
+        text-shadow: none;
+    }
+    body.theme-light .ps-input {
+      background-color: rgba(255,255,255,0.5);
+      border: 1px solid var(--ps-border);
+      color: var(--ps-text);
+    }
+    body.theme-light .leaflet-popup-content-wrapper, body.theme-light .leaflet-popup-tip {
+        background: var(--ps-panel-bg);
+        color: var(--ps-text);
+        border: 1px solid var(--ps-border);
+    }
+    body.theme-light .leaflet-container a.leaflet-popup-close-button { color: var(--ps-text-dim); }
+
+    /* High Contrast Theme */
+    body.theme-high-contrast {
+      --ps-blue: #00ffff;
+      --ps-cyan: #00ffff;
+      --ps-magenta: #ff00ff;
+      --ps-lime: #39ff14;
+      --ps-glow: #00ffff;
+      --ps-glow-soft: #00ffff;
+      --ps-dark-bg: #000000;
+      --ps-panel-bg: rgba(0, 0, 0, 0.8);
+      --ps-border: #ffff00;
+      --ps-text: #ffffff;
+      --ps-text-dim: #dddddd;
+    }
+    body.theme-high-contrast .ps-card, 
+    body.theme-high-contrast .ps-button, 
+    body.theme-high-contrast .ps-input,
+    body.theme-high-contrast .leaflet-popup-content-wrapper {
+        border-width: 2px;
+        border-color: #ffff00;
+        background: #000;
+        color: #fff;
+    }
+    body.theme-high-contrast .ps-button:hover {
+        background: #ffff00;
+        color: #000;
+        text-shadow: none;
+    }
+    body.theme-high-contrast h1, body.theme-high-contrast h2, body.theme-high-contrast h3,
+    body.theme-high-contrast .font-audiowide, body.theme-high-contrast .text-cyan-300 {
+        text-shadow: none;
+        color: #ffff00;
+    }
+    body.theme-high-contrast .preloader-icon {
+        color: #ffff00;
+        filter: none;
+    }
+
     body {
       font-family: 'Inter', sans-serif;
       background-color: var(--ps-dark-bg);
@@ -30,6 +120,7 @@
       overflow: hidden;
       background-image: radial-gradient(rgba(0, 153, 255, 0.08) 1px, transparent 1px);
       background-size: 1.5rem 1.5rem;
+      font-size: 1rem; /* Controlled by root font-size */
     }
     h1, h2, h3, .font-orbitron, .font-audiowide {
       font-family: 'Orbitron', sans-serif;
@@ -63,6 +154,7 @@
       height: 100vh;
       width: 100vw;
       overflow: hidden;
+      position: relative;
     }
     .main-layout {
       position: relative;
@@ -306,54 +398,88 @@
         display: none;
     }
 
-    /* Location Dashboard Styles (PowerBI-inspired) */
-    @keyframes fadeInDashboard { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes fadeOutDashboard { from { opacity: 1; } to { opacity: 0; } }
-    
-    @keyframes futuristic-tile-in {
-      0% {
-        opacity: 0;
-        transform: translateY(25px) scale(0.95);
-        filter: blur(4px) brightness(1.75);
-        border-color: rgba(0, 255, 255, 0.6);
-        box-shadow: 0 0 20px rgba(0, 255, 255, 0.3), inset 0 0 8px rgba(0, 255, 255, 0.2);
-      }
-      70% {
-        opacity: 0.9;
-        transform: translateY(0) scale(1.02);
-        filter: blur(0.5px) brightness(1.2);
-      }
-      100% {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-        filter: blur(0) brightness(1);
-        border-color: rgba(0, 191, 255, 0.2);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-      }
+    /* New Mission Briefing Carousel Styles */
+    .mission-carousel {
+      height: 150px;
+      position: relative;
+      overflow: hidden;
+      border-radius: 12px;
+      background: rgba(10, 20, 45, 0.5);
+      border: 1px solid var(--ps-border);
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.5);
     }
-
-    .location-dashboard {
-      position: fixed;
-      inset: 0;
-      z-index: 1000;
+    .carousel-track {
+      display: flex;
+      height: 100%;
+      transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .carousel-slide {
+      min-width: 100%;
+      height: 100%;
+      padding: 1rem;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.3), rgba(30, 41, 59, 0.3));
+    }
+    .slide-header {
       display: flex;
       align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--ps-text-dim);
+    }
+    .slide-header i {
+      font-size: 1rem;
+    }
+    .slide-content {
+      text-align: center;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       justify-content: center;
-      background: rgba(3, 6, 19, 0.85);
-      backdrop-filter: blur(8px) saturate(120%);
-      -webkit-backdrop-filter: blur(8px) saturate(120%);
-      animation: fadeInDashboard 0.4s ease-out forwards, fadeOutDashboard 0.4s ease-in 9.6s forwards;
     }
-
-    .dashboard-tile {
-        opacity: 0;
-        animation: futuristic-tile-in 0.8s cubic-bezier(0.19, 1, 0.22, 1) forwards;
-        background: rgba(10, 20, 45, 0.7);
-        border: 1px solid rgba(0, 191, 255, 0.2);
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    .carousel-dots {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      z-index: 5;
     }
-    .dashboard-tile .text-glow {
-        text-shadow: 0 0 5px currentColor, 0 0 8px currentColor;
+    .carousel-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: rgba(255, 255, 255, 0.3);
+      border: 1px solid rgba(0, 191, 255, 0.3);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .carousel-dot.active {
+      background-color: var(--ps-cyan);
+      transform: scale(1.2);
+      box-shadow: 0 0 5px var(--ps-cyan);
+    }
+    @keyframes text-glow-pulse {
+      0%, 100% { text-shadow: 0 0 5px var(--ps-glow-soft), 0 0 10px var(--ps-glow-soft); }
+      50% { text-shadow: 0 0 10px var(--ps-glow), 0 0 20px var(--ps-glow); }
+    }
+    @keyframes icon-glow-pulse {
+      0%, 100% { filter: drop-shadow(0 0 3px currentColor); }
+      50% { filter: drop-shadow(0 0 6px currentColor); }
+    }
+    .text-glow-pulse {
+        animation: text-glow-pulse 3s infinite ease-in-out;
+    }
+    .icon-glow-pulse {
+        animation: icon-glow-pulse 3s infinite ease-in-out;
     }
 
     /* Thin scrollbar for specific elements */
@@ -371,6 +497,117 @@
         background: var(--ps-blue);
     }
 
+    /* Pre-loader specific styles */
+    .preloader {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        height: 100%;
+        padding: 2rem;
+        background: var(--ps-dark-bg);
+        color: var(--ps-text);
+        animation: preloader-fade-in 1s ease-out;
+    }
+
+    @keyframes preloader-fade-in {
+        from { opacity: 0; transform: scale(0.95); }
+        to { opacity: 1; transform: scale(1); }
+    }
+
+    .preloader-icon {
+        width: 6rem;
+        height: 6rem;
+        color: var(--ps-cyan);
+        filter: drop-shadow(0 0 10px var(--ps-cyan));
+        margin-bottom: 1.5rem;
+        animation: icon-pulse 2s infinite alternate;
+    }
+    
+    @keyframes icon-pulse {
+        from { filter: drop-shadow(0 0 8px var(--ps-cyan)); transform: scale(1); }
+        to { filter: drop-shadow(0 0 16px var(--ps-cyan)); transform: scale(1.05); }
+    }
+
+    .preloader-features {
+        max-width: 450px;
+        margin-top: 2rem;
+        text-align: left;
+        display: grid;
+        gap: 1rem;
+    }
+    .preloader-feature {
+        display: flex;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.4);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--ps-border);
+    }
+    .preloader-feature i {
+        color: var(--ps-blue);
+        width: 2rem;
+        text-align: center;
+        font-size: 1.25rem;
+    }
+
+    .preloader-status {
+        margin-top: 2.5rem;
+        font-family: 'Orbitron', sans-serif;
+        letter-spacing: 0.1em;
+        color: var(--ps-text-dim);
+        animation: pulse-text 1.5s infinite alternate;
+    }
+    
+    @keyframes pulse-text {
+        from { opacity: 0.7; }
+        to { opacity: 1; }
+    }
+    
+    /* Leaflet custom styles */
+    .leaflet-popup-content-wrapper {
+        background: var(--ps-panel-bg);
+        color: var(--ps-text);
+        border: 1px solid var(--ps-border);
+        border-radius: 8px;
+        box-shadow: 0 0 15px var(--ps-glow-soft);
+    }
+    .leaflet-popup-content {
+        margin: 10px;
+        font-family: 'Inter', sans-serif;
+    }
+    .leaflet-popup-tip {
+        background: var(--ps-panel-bg);
+    }
+    .leaflet-container a.leaflet-popup-close-button {
+        color: var(--ps-text-dim);
+    }
+    .leaflet-container a.leaflet-popup-close-button:hover {
+        color: var(--ps-text);
+    }
+    .leaflet-div-icon {
+        background: transparent;
+        border: none;
+    }
+
+    /* Toast Notification Styles */
+    @keyframes slide-in-right {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    .icon-pet-glow {
+        color: var(--ps-cyan);
+        filter: drop-shadow(0 0 6px var(--ps-cyan));
+        animation: pulse-glow 2s infinite alternate;
+    }
   </style>
 <script type="importmap">
 {
@@ -378,13 +615,52 @@
     "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
     "@google/genai": "https://esm.sh/@google/genai@^1.6.0",
     "react/": "https://esm.sh/react@^19.1.0/",
-    "react": "https://esm.sh/react@^19.1.0"
+    "react": "https://esm.sh/react@^19.1.0",
+    "leaflet": "https://aistudiocdn.com/leaflet@^1.9.4",
+    "leaflet.heat": "https://aistudiocdn.com/leaflet.heat@^0.2.0"
   }
 }
 </script>
 </head>
-<body class="bg-slate-950 text-slate-300">
-  <div id="root"></div>
+<body class="theme-dark">
+  <div id="root">
+    <!-- START: Pre-loader content -->
+    <div class="preloader">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="preloader-icon">
+        <path d="M18.928 4.072a.75.75 0 00-.928-.5H6a.75.75 0 00-.728.5L4.018 9.197A4.502 4.502 0 003.75 10.5V17a3 3 0 003 3h1.5V17a.75.75 0 011.5 0v3H15V17a.75.75 0 011.5 0v3h1.5a3 3 0 003-3v-6.5a4.502 4.502 0 00-.268-1.303L18.928 4.072zM7.5 14.25a.75.75 0 01.75-.75h.008a.75.75 0 01.75.75v.008a.75.75 0 01-.75.75h-.008a.75.75 0 01-.75-.75v-.008zm9 0a.75.75 0 01.75-.75h.008a.75.75 0 01.75.75v.008a.75.75 0 01-.75.75h-.008a.75.75 0 01-.75-.75v-.008zM7.383 6h9.234l.732 2.5H6.65L7.383 6z" />
+      </svg>
+      <h1 class="text-5xl font-audiowide text-cyan-300" style="text-shadow: 0 0 8px var(--ps-glow-soft);">UppA</h1>
+      <p class="font-orbitron text-slate-300 mt-2">Conectando tu viaje. Potenciado por la comunidad y la IA.</p>
+      
+      <div class="preloader-features">
+        <div class="preloader-feature">
+          <i class="fas fa-satellite-dish"></i>
+          <span><strong>Intel en Tiempo Real:</strong> Reportes de demoras, estado y seguridad de la comunidad.</span>
+        </div>
+        <div class="preloader-feature">
+          <i class="fas fa-brain"></i>
+          <span><strong>Asistente IA Gemini:</strong> Consulta horarios, rutas y estado del servicio.</span>
+        </div>
+        <div class="preloader-feature">
+          <i class="fas fa-motorcycle"></i>
+          <span><strong>Micromovilidad:</strong> Encuentra Motos y Remises de pilotos verificados.</span>
+        </div>
+        <div class="preloader-feature">
+          <i class="fas fa-route"></i>
+          <span><strong>Planificador de Misión:</strong> Traza tu ruta óptima, evitando imprevistos.</span>
+        </div>
+      </div>
+
+      <div class="preloader-status">Iniciando Nexo Urbano...</div>
+    </div>
+    <!-- END: Pre-loader content -->
+  </div>
+  <noscript>
+    <div style="background-color: #030613; color: #e0e8f0; text-align: center; padding: 4rem; height: 100vh; font-family: 'Inter', sans-serif;">
+      <h2 style="font-family: 'Orbitron', sans-serif; color: #ff00ff; font-size: 2rem;">JavaScript Requerido</h2>
+      <p>UppA es una aplicación interactiva. Por favor, activa JavaScript en tu navegador para conectar a la Red Urbana.</p>
+    </div>
+  </noscript>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

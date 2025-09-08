@@ -1,7 +1,8 @@
 
+
 import React, { useState, useCallback, useRef } from 'react';
 import { ReportType, Report, UserProfile, Coordinates } from '../types'; // Added Coordinates
-import { REPORT_TYPE_ICONS, DEFAULT_USER_ID, DEFAULT_USER_NAME, REPORT_FORM_EMOJIS } from '../constants';
+import { REPORT_TYPE_ICONS, DEFAULT_USER_ID, DEFAULT_USER_NAME, REPORT_FORM_EMOJIS, REPORT_TYPE_TRANSLATIONS } from '../constants';
 import { analyzeSentiment } from '../services/geminiService';
 
 interface ReportFormProps {
@@ -103,7 +104,8 @@ const ReportForm: React.FC<ReportFormProps> = ({ busLineId, currentUser, onSubmi
         >
           {Object.values(ReportType).map((type) => (
             <option key={type} value={type} className="bg-slate-800">
-              <i className={`${REPORT_TYPE_ICONS[type] || 'fas fa-info-circle'} mr-2 w-4 inline-block text-center`}></i> {type}
+              {/* FIX: Cast `type` to `ReportType` to correctly index `REPORT_TYPE_ICONS`. `Object.values` on a string enum returns `string[]`, which is not specific enough for indexing. */}
+              <i className={`${REPORT_TYPE_ICONS[type as ReportType] || 'fas fa-info-circle'} mr-2 w-4 inline-block text-center`}></i> {REPORT_TYPE_TRANSLATIONS[type as ReportType] || type}
             </option>
           ))}
         </select>

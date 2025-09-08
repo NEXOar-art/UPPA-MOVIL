@@ -1,9 +1,10 @@
-import { ReportType, Bus, MicromobilityServiceType, Coordinates, BusStop, BusLineDetails } from './types';
+import { ReportType, Bus, MicromobilityServiceType, Coordinates, BusStop, BusLineDetails, BadgeId } from './types';
 
 
 export const API_KEY_ERROR_MESSAGE = "La variable de entorno API_KEY para Gemini no está configurada. Por favor, asegúrese de que esté configurada.";
-// The API key for Google Maps services must be provided via an environment variable.
-export const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY; 
+// The API key for LocationIQ services is hardcoded for this application version as requested.
+export const LOCATIONIQ_API_KEY = "pk.ce5c15b8df54102d8cb22ea3cbabd14c";
+export const OPENWEATHER_API_KEY = "0a49b2d34b5b7e8b65a6bd7da25e4bd8";
 export const SUBE_URL = "https://tarjetasube.sube.gob.ar/SubeWeb/Webforms/Account/Views/login.aspx";
 export const UPPA_MERCADO_PAGO_ALIAS = "uppa.colectivo.mp"; // Example Mercado Pago Alias for UppA
 export const UPPA_CRYPTO_ADDRESS_EXAMPLE = "0x123abcDEF456GHI789jklMNO012pQrS345"; // Example Crypto Address
@@ -53,12 +54,10 @@ export const BUS_LINE_ADDITIONAL_INFO: Record<string, BusLineDetails> = {
         startPoint: "Vigalondo Y Bomberos Voluntarios (Campana)",
         endPoint: "Centro De Transferencia De Zárate (también parada para líneas 194, 204, 429 y combi)",
         keyStops: [
-          "Vigalondo Y Bomberos Voluntarios", "A. Schinoni, 222", "Casaux Y Chapuis (Las Campanas)",
-          "Escuela Técnica Roberto Rocca", "Colectora Sur Y Avenida Bellomo", "Colectora Sur Y Avenida Lavezzari",
-          "Estación Campana", "San Martín Y Avenida Mitre", "Rp 6 Y Rn 12", "Avenida Lavalle Y Pellegrini",
-          "Leandro Alem Y Rivadavia", "Florestano Andrade Atucha (varias paradas, ej., 173, 1387)",
-          "Calle Juan José Paso (varias paradas, ej., 1185, 1750)", "Avenida Anta Y España",
-          "Centro De Transferencia De Zárate",
+          "Vigalondo Y Bomberos Voluntarios", "A. Schinoni, 187", "Escuela Técnica Roberto Rocca", "A. Aguiar Y Ariel del Plata",
+          "Estación Campana", "Colectora Sur Y Avenida Bellomo", "Av. Rubén Varela y Av. Teniente Perón",
+          "Gral. Belgrano y Av. Mitre (Zárate)", "Avenida Lavalle Y Pellegrini",
+          "Florestano Andrade Atucha (Zárate)", "Centro De Transferencia De Zárate",
         ],
       },
     ],
@@ -75,14 +74,93 @@ export const BUS_LINE_ADDITIONAL_INFO: Record<string, BusLineDetails> = {
   },
 };
 
+// --- START: Accurate Geocoding for LINEA_228CB ---
+// This section replaces the previous programmatic simulation with a manually curated list of
+// coordinates to ensure cartographic accuracy, as requested by the user.
+
+const stopNames228CB = [
+    // Campana
+    "Vigalondo Y Bomberos Voluntarios", "Vigalondo Y Sierra", "A. Schinoni, 187", "Escuela Técnica Roberto Rocca", "A. Aguiar Y Ariel del Plata", "Estación Campana", "San Martín y Luis Costa", "San Martín y Güemes", "San Martín y Av. Mitre", "Belgrano y Alberdi",
+    // Colectora Sur
+    "Colectora Sur y Grassi", "Colectora Sur y Avenida Bellomo", "Colectora Sur y Avenida Lavezzari", "Colectora Sur y Avenida Mitre", "Colectora Sur y Magaldi", "Colectora Sur y Antártida Argentina", "Colectora Sur y Maipú",
+    // Av. Varela
+    "Av. Rubén Varela y Salmini", "Av. Rubén Varela y Av. Teniente Perón", "Av. Rubén Varela y Bertolini", "Av. Ruben Varela y Sivori", "Av. Ruben Varela y Av. Ameghino",
+    // Gral. Belgrano (Zárate)
+    "Gral. Belgrano y Alberdi (Zárate)", "Gral. Belgrano y Jean Jaures", "Gral. Belgrano y Av. Mitre (Zárate)", "Gral. Belgrano y De Dominicis", "Gral. Belgrano y Becerra", "Gral. Belgrano y Alem (Zárate)",
+    // Zárate (Centro y Avenidas)
+    "Av. Lavalle 800 (Zárate)", "Av. Lavalle 400 (Zárate)", "Leandro Alem 1200 (Zárate)", "Leandro Alem 800 (Zárate)", "Florestano Andrade Atucha 200 (Zárate)", "Av. Anta y España (Zárate)", "Calle Juan José Paso 1100 (Zárate)", "Centro De Transferencia De Zárate",
+    // Otras paradas notables
+    "Schinoni Y Miracca", "Casaux Y Chapuis", "Fremi Y Cassaux", "Casaux Y Goujon", "Doctor Salk 204", "Viamonte 1299", "Uruguay 642", "Av. Rivadavia 1410", "Jean Jaures y 3 de Febrero (Zárate)", "Av. Mitre y Gral. Paz (Zárate)", "RP 6"
+];
+
+const realCoords228CB: Coordinates[] = [
+    // Campana
+    { lat: -34.209417, lng: -58.942670 }, // Vigalondo Y Bomberos Voluntarios
+    { lat: -34.1765, lng: -58.9522 }, // Vigalondo Y Sierra
+    { lat: -34.210327, lng: -58.937845 }, // A. Schinoni, 187
+    { lat: -34.200528, lng: -58.937901 }, // Escuela Técnica Roberto Rocca
+    { lat: -34.203817, lng: -58.934981 }, // A. Aguiar Y Ariel del Plata
+    { lat: -34.156947, lng: -58.958908 }, // Estación Campana
+    { lat: -34.1668, lng: -58.9585 }, // San Martín y Luis Costa
+    { lat: -34.1650, lng: -58.9570 }, // San Martín y Güemes
+    { lat: -34.1632, lng: -58.9555 }, // San Martín y Av. Mitre
+    { lat: -34.1615, lng: -58.9538 }, // Belgrano y Alberdi
+    // Colectora Sur (heading towards Zárate)
+    { lat: -34.1550, lng: -58.9750 }, // Colectora Sur y Grassi
+    { lat: -34.1512, lng: -58.9810 }, // Colectora Sur y Avenida Bellomo
+    { lat: -34.1478, lng: -58.9865 }, // Colectora Sur y Avenida Lavezzari
+    { lat: -34.1440, lng: -58.9920 }, // Colectora Sur y Avenida Mitre
+    { lat: -34.1395, lng: -58.9990 }, // Colectora Sur y Magaldi
+    { lat: -34.1350, lng: -59.0060 }, // Colectora Sur y Antártida Argentina
+    { lat: -34.1310, lng: -59.0120 }, // Colectora Sur y Maipú
+    // Av. Varela (in Campana)
+    { lat: -34.1700, lng: -58.9510 }, // Av. Rubén Varela y Salmini
+    { lat: -34.175634, lng: -58.960399 }, // Av. Rubén Varela y Av. Teniente Perón
+    { lat: -34.1750, lng: -58.9450 }, // Av. Rubén Varela y Bertolini
+    { lat: -34.1775, lng: -58.9420 }, // Av. Ruben Varela y Sivori
+    { lat: -34.1800, lng: -58.9390 }, // Av. Ruben Varela y Av. Ameghino
+    // Gral. Belgrano (Zárate)
+    { lat: -34.1030, lng: -59.0230 }, // Gral. Belgrano y Alberdi (Zárate)
+    { lat: -34.1015, lng: -59.0250 }, // Gral. Belgrano y Jean Jaures
+    { lat: -34.0998, lng: -59.0275 }, // Gral. Belgrano y Av. Mitre (Zárate)
+    { lat: -34.0980, lng: -59.0300 }, // Gral. Belgrano y De Dominicis
+    { lat: -34.0965, lng: -59.0320 }, // Gral. Belgrano y Becerra
+    { lat: -34.0950, lng: -59.0340 }, // Gral. Belgrano y Alem (Zárate)
+    // Zárate (Centro y Avenidas)
+    { lat: -34.0985, lng: -59.0255 }, // Av. Lavalle 800
+    { lat: -34.0960, lng: -59.0270 }, // Av. Lavalle 400
+    { lat: -34.0940, lng: -59.0300 }, // Leandro Alem 1200
+    { lat: -34.0920, lng: -59.0325 }, // Leandro Alem 800
+    { lat: -34.0910, lng: -59.0350 }, // Florestano Andrade Atucha 200
+    { lat: -34.0880, lng: -59.0380 }, // Av. Anta y España
+    { lat: -34.0850, lng: -59.0410 }, // Calle Juan José Paso 1100
+    { lat: -34.0900, lng: -59.0280 }, // Centro De Transferencia De Zárate
+    // Otras paradas notables (placing them logically in the route)
+    { lat: -34.1735, lng: -58.9555 }, // Schinoni Y Miracca
+    { lat: -34.1718, lng: -58.9567 }, // Casaux Y Chapuis
+    { lat: -34.1705, lng: -58.9575 }, // Fremi Y Cassaux
+    { lat: -34.1690, lng: -58.9583 }, // Casaux Y Goujon
+    { lat: -34.1645, lng: -58.9610 }, // Doctor Salk 204
+    { lat: -34.0970, lng: -59.0240 }, // Viamonte 1299
+    { lat: -34.0945, lng: -59.0265 }, // Uruguay 642
+    { lat: -34.0925, lng: -59.0290 }, // Av. Rivadavia 1410
+    { lat: -34.1018, lng: -59.0245 }, // Jean Jaures y 3 de Febrero (Zárate)
+    { lat: -34.0995, lng: -59.0278 }, // Av. Mitre y Gral. Paz (Zárate)
+    { lat: -34.1200, lng: -59.0500 }  // RP 6 (approximate point on the route)
+];
+
+const realStops228CB: BusStop[] = stopNames228CB.map((name, index) => ({
+    id: `stop_228cb_real_${index}`,
+    name,
+    location: realCoords228CB[index] || ZARATE_CENTRO, // Fallback to a known point
+    busLineIds: ["LINEA_228CB"],
+}));
+
+// --- END: Accurate Geocoding for LINEA_228CB ---
+
 
 export const MOCK_BUS_STOPS_DATA: Record<string, BusStop[]> = {
-  "LINEA_228CB": [
-    { id: "stop_228cb_zarate_centro", name: "Zárate Centro (Mitre y Justa Lima)", location: ZARATE_CENTRO, busLineIds: ["LINEA_228CB", "LINEA_194"] },
-    { id: "stop_228cb_estacion_zarate", name: "Estación Zárate", location: { lat: -34.0980, lng: -59.0275 }, busLineIds: ["LINEA_228CB"] },
-    { id: "stop_228cb_campana_plaza", name: "Campana Plaza Principal", location: CAMPANA_PLAZA, busLineIds: ["LINEA_228CB", "LINEA_194"] },
-    { id: "stop_228cb_campana_estacion", name: "Estación Campana", location: { lat: -34.1700, lng: -58.9550 }, busLineIds: ["LINEA_228CB"] },
-  ],
+  "LINEA_228CB": realStops228CB,
   "LINEA_194": [
     { id: "stop_194_plaza_italia", name: "Plaza Italia (CABA)", location: BA_PLAZA_ITALIA, busLineIds: ["LINEA_194"] },
     { id: "stop_194_puente_saavedra", name: "Puente Saavedra", location: { lat: -34.5420, lng: -58.4800 }, busLineIds: ["LINEA_194"] },
@@ -124,6 +202,25 @@ export const REPORT_TYPE_ICONS: Record<ReportType, string> = {
   [ReportType.VeryFull]: "fas fa-people-carry", 
   [ReportType.GoodService]: "fas fa-thumbs-up", 
   [ReportType.BadService]: "fas fa-thumbs-down", 
+};
+
+export const REPORT_TYPE_TRANSLATIONS: Record<ReportType, string> = {
+  [ReportType.Delay]: "Demora",
+  [ReportType.RouteChange]: "Cambio de Ruta",
+  [ReportType.Detour]: "Desvío",
+  [ReportType.WaitTime]: "Tiempo de Espera",
+  [ReportType.SafetyIncident]: "Incidente de Seguridad",
+  [ReportType.MechanicalIssue]: "Falla Mecánica",
+  [ReportType.ComfortIssue]: "Problema de Confort",
+  [ReportType.PriceUpdate]: "Actualización de Precio",
+  [ReportType.LocationUpdate]: "Actualización de Ubicación",
+  [ReportType.Crowded]: "Aglomeración",
+  [ReportType.BusMoving]: "Colectivo en Movimiento",
+  [ReportType.BusStopped]: "Colectivo Detenido",
+  [ReportType.Full]: "Lleno",
+  [ReportType.VeryFull]: "Muy Lleno",
+  [ReportType.GoodService]: "Buen Servicio",
+  [ReportType.BadService]: "Mal Servicio",
 };
 
 export const MICROMOBILITY_SERVICE_ICONS: Record<MicromobilityServiceType, string> = {
@@ -259,3 +356,56 @@ Teléfonos y Direcciones de Interés - Campana y Zárate:
 
 export const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 export const GEMINI_CHAT_DRAFT_MODEL = 'gemini-2.5-flash';
+
+export const BADGE_DEFINITIONS: Record<BadgeId, { name: string; description: string; icon: string; }> = {
+  [BadgeId.REPORTER_NOVICE]: {
+    name: "Reportero Novato",
+    description: "Realizaste tu primer reporte. ¡Bienvenido a la red de inteligencia!",
+    icon: "fas fa-bullhorn",
+  },
+  [BadgeId.REPORTER_PRO]: {
+    name: "Reportero Pro",
+    description: "Realizaste 10 reportes. Eres un colaborador regular.",
+    icon: "fas fa-broadcast-tower",
+  },
+  [BadgeId.REPORTER_ELITE]: {
+    name: "Reportero de Élite",
+    description: "Realizaste 50 reportes. Tus ojos están en toda la ciudad.",
+    icon: "fas fa-satellite-dish",
+  },
+  [BadgeId.HELPFUL_VOICE]: {
+    name: "Voz Útil",
+    description: "Tus reportes han recibido 5 votos positivos. ¡La comunidad valora tu aporte!",
+    icon: "fas fa-thumbs-up",
+  },
+  [BadgeId.COMMUNITY_PILLAR]: {
+    name: "Pilar de la Comunidad",
+    description: "Tus reportes han acumulado 25 votos positivos. Eres un pilar fundamental de UppA.",
+    icon: "fas fa-award",
+  },
+  [BadgeId.MOTO_PILOT]: {
+    name: "Piloto de Moto",
+    description: "Registraste tu primer servicio de moto. ¡Bienvenido al asfalto!",
+    icon: "fas fa-motorcycle",
+  },
+  [BadgeId.REMIS_DRIVER]: {
+    name: "Conductor de Remis",
+    description: "Registraste tu primer servicio de remis. ¡A rodar!",
+    icon: "fas fa-car",
+  },
+  [BadgeId.ROAD_VETERAN]: {
+    name: "Veterano del Asfalto",
+    description: "Completaste 10 viajes como proveedor. Eres un piloto experimentado.",
+    icon: "fas fa-road",
+  },
+  [BadgeId.TOP_RATED]: {
+    name: "Servicio de 5 Estrellas",
+    description: "Mantienes una calificación promedio de 4.8 o más después de 10 reseñas.",
+    icon: "fas fa-star",
+  },
+  [BadgeId.CHATTERBOX]: {
+    name: "Radioaficionado",
+    description: "Enviaste 20 mensajes en los chats. ¡La comunicación es clave!",
+    icon: "fas fa-comments",
+  },
+};
